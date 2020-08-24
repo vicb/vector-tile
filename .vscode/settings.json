@@ -1,0 +1,7 @@
+{
+  "eslint.run": "onSave",
+  "eslint.alwaysShowStatus": true,
+  "eslint.codeActionsOnSave.mode": "problems",
+  "eslint.format.enable": true,
+  "eslint.lintTask.enable": true
+}
