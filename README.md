@@ -11,7 +11,7 @@ It is based on [`@mapbox/vector-tile`](https://www.npmjs.com/package/@mapbox/vec
 ## Install
 
 ```
-npm i --save vector-tile
+npm i --save mapbox-vector-tile
 ```
 
 ## Example
