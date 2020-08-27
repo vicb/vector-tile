@@ -2,7 +2,6 @@
 //
 // See https://github.com/mapbox/vector-tile-spec.
 
-import * as Long from 'long';
 import { Reader } from 'protobufjs/minimal';
 
 export class Point {
@@ -368,7 +367,10 @@ function signedArea(ring: Point[]) {
 }
 
 // Convert a long to a number.
-function longToNumber(long: Long) {
+function longToNumber(long: Long | number): number {
+  if (typeof long === 'number') {
+    return long;
+  }
   if (long.gt(Number.MAX_SAFE_INTEGER)) {
     throw new globalThis.Error('Value is larger than Number.MAX_SAFE_INTEGER');
   }
