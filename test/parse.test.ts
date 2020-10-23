@@ -32,7 +32,7 @@ describe('parses vector tile', () => {
 
     const park = tile.layers.poi_label.feature(11);
     expect(park.bbox()).toEqual([3898, 1731, 3898, 1731]);
-    expect(park.id).toBe(3000003150561);
+    expect(park.id).toBe("3000003150561");
     expect(park.properties.name).toBe('Mauerpark');
     expect(park.properties.type).toBe('Park');
     expect(park.type).toBe(FeatureType.POINT);
@@ -52,7 +52,7 @@ describe('parses vector tile', () => {
   it('converts to GeoJSON', () => {
     expect(tile.layers.poi_label.feature(11).toGeoJSON(8801, 5371, 14)).toEqual({
       type: 'Feature',
-      id: 3000003150561,
+      id: "3000003150561",
       properties: {
         localrank: 1,
         maki: 'park',
@@ -74,7 +74,7 @@ describe('parses vector tile', () => {
 
     expect(tile.layers.bridge.feature(0).toGeoJSON(8801, 5371, 14)).toEqual({
       type: 'Feature',
-      id: 238162948,
+      id: "238162948",
       properties: {
         class: 'service',
         oneway: 0,
@@ -92,7 +92,7 @@ describe('parses vector tile', () => {
 
     expect(tile.layers.building.feature(0).toGeoJSON(8801, 5371, 14)).toEqual({
       type: 'Feature',
-      id: 1000267229912,
+      id: "1000267229912",
       properties: {
         osm_id: 1000267229912,
       },

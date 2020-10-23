@@ -2,10 +2,13 @@
 //
 // See https://github.com/mapbox/vector-tile-spec.
 
-import { Reader } from 'protobufjs/minimal';
+import { BinaryReader, PbLong, PbULong } from '@protobuf-ts/runtime';
+
+export type LongType = "number" | "string" | "bigint";
+export type PropValues = string | number | boolean | bigint | null;
 
 export class Point {
-  constructor(public readonly x: number, public readonly y: number) {}
+  constructor(public readonly x: number, public readonly y: number) { }
 }
 
 // A vector tile.
@@ -15,15 +18,15 @@ export class VectorTile {
   // List of non-empty layers.
   readonly layers: { [key: string]: Layer } = {};
 
-  private reader: Reader;
+  private reader: BinaryReader;
 
   // The constructor takes a byte buffer.
-  constructor(bytes: Uint8Array | Buffer) {
-    this.reader = Reader.create(bytes);
+  constructor(bytes: Uint8Array | Buffer, private longType: LongType = "number") {
+    this.reader = new BinaryReader(bytes);
     const end = this.reader.len;
     while (this.reader.pos < end) {
       this.reader.uint32();
-      const layer = new Layer(this.reader, this.reader.uint32() + this.reader.pos);
+      const layer = new Layer(this.reader, this.reader.uint32() + this.reader.pos, this.longType);
       if (layer.length) {
         this.layers[layer.name] = layer;
       }
@@ -39,16 +42,13 @@ export class Layer {
   readonly length: number;
 
   private featureOffsets: number[] = [];
-  private reader: Reader;
   private keys: string[] = [];
-  private values: Array<string | number | boolean | null> = [];
+  private values: Array<PropValues> = [];
 
-  constructor(reader: Reader, end: number) {
-    this.reader = reader;
+  constructor(private reader: BinaryReader, end: number, private longType: LongType) {
 
     while (reader.pos < end) {
-      const tag = reader.uint32();
-      const fieldId = tag >>> 3;
+      const [fieldId, wireType] = reader.tag();
       if (fieldId == 15) {
         this.version = reader.uint32();
       } else if (fieldId == 1) {
@@ -57,11 +57,11 @@ export class Layer {
         this.extent = reader.uint32();
       } else if (fieldId == 2) {
         this.featureOffsets.push(reader.pos);
-        reader.skipType(tag & 0x7);
+        reader.skip(wireType);
       } else if (fieldId == 3) {
         this.keys.push(reader.string());
       } else if (fieldId == 4) {
-        this.values.push(this.decodeValue(reader));
+        this.values.push(this.decodeValue());
       }
     }
 
@@ -78,30 +78,42 @@ export class Layer {
     return new Feature(this.reader, end, this.keys, this.values, this.extent);
   }
 
-  private decodeValue(reader: Reader): string | number | boolean | null {
+  private decodeValue(): PropValues {
+    const reader = this.reader;
     const end = reader.uint32() + reader.pos;
-    let value: string | number | boolean | null = null;
+    let value: PropValues = null;
     while (reader.pos < end) {
-      const tag = reader.uint32() >>> 3;
-      if (tag == 1) {
+      const [fieldId] = reader.tag();
+      if (fieldId == 1) {
         value = reader.string();
-      } else if (tag == 2) {
+      } else if (fieldId == 2) {
         value = reader.float();
-      } else if (tag == 3) {
+      } else if (fieldId == 3) {
         value = reader.double();
-      } else if (tag == 4) {
-        value = longToNumber(reader.int64() as Long);
-      } else if (tag == 5) {
-        value = longToNumber(reader.uint64() as Long);
-      } else if (tag == 6) {
-        value = longToNumber(reader.sint64() as Long);
-      } else if (tag == 7) {
+      } else if (fieldId == 4) {
+        value = this.convertLong(reader.int64());
+      } else if (fieldId == 5) {
+        value = this.convertLong(reader.uint64());
+      } else if (fieldId == 6) {
+        value = this.convertLong(reader.sint64());
+      } else if (fieldId == 7) {
         value = reader.bool();
       } else {
         value = null;
       }
     }
     return value;
+  }
+
+  private convertLong(long: PbULong | PbLong): string | number | bigint {
+    switch (this.longType) {
+      case "number":
+        return long.toNumber();
+      case "string":
+        return long.toString();
+      case "bigint":
+        return long.toBigInt();
+    }
   }
 }
 
@@ -120,26 +132,23 @@ const enum Command {
 
 // A feature in a layer.
 export class Feature {
-  readonly id?: number;
+  readonly id?: string;
   readonly type: FeatureType = FeatureType.UNKNOWN;
-  readonly properties: { [key: string]: string | number | boolean | null } = {};
+  readonly properties: { [key: string]: PropValues } = {};
 
   private geometryOffset = 0;
-  private reader: Reader;
 
   constructor(
-    reader: Reader,
+    private reader: BinaryReader,
     end: number,
     keys: string[],
-    values: Array<string | number | boolean | null>,
+    values: Array<PropValues>,
     public readonly extent: number,
   ) {
-    this.reader = reader;
     while (reader.pos < end) {
-      const tag = reader.uint32();
-      const fieldId = tag >> 3;
+      const [fieldId, wireType] = reader.tag();
       if (fieldId == 1) {
-        this.id = longToNumber(reader.int64() as Long);
+        this.id = reader.int64().toString();
       } else if (fieldId == 2) {
         const end = reader.uint32() + reader.pos;
         while (reader.pos < end) {
@@ -151,7 +160,7 @@ export class Feature {
         this.type = reader.uint32();
       } else if (fieldId == 4) {
         this.geometryOffset = reader.pos;
-        reader.skipType(tag & 0x7);
+        reader.skip(wireType);
       }
     }
   }
@@ -364,15 +373,4 @@ function signedArea(ring: Point[]) {
     sum += (point2.x - point1.x) * (point1.y + point2.y);
   }
   return sum;
-}
-
-// Convert a long to a number.
-function longToNumber(long: Long | number): number {
-  if (typeof long === 'number') {
-    return long;
-  }
-  if (long.gt(Number.MAX_SAFE_INTEGER)) {
-    throw new globalThis.Error('Value is larger than Number.MAX_SAFE_INTEGER');
-  }
-  return long.toNumber();
 }
