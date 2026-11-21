@@ -17,6 +17,12 @@ import type {
 
 export type LongType = "number" | "string" | "bigint";
 export type PropValues = string | number | boolean | bigint | null;
+export type Coord2D = [number, number];
+
+export interface FlatGeometry {
+  readonly coords: number[];
+  readonly ends: number[];
+}
 
 export type GeoJSONFeatureGeometry =
   | GeoJSONPoint
@@ -179,6 +185,48 @@ const enum Command {
   ClosePath = 7,
 }
 
+const RAD_TO_DEG = 360 / Math.PI;
+const MAX_SCRATCH_COORDS = 8192;
+const MAX_SCRATCH_ENDS = 1024;
+let scratchCoords: number[] | null = [];
+let scratchEnds: number[] | null = [];
+
+function releaseScratch(coords: number[], ends: number[]): void {
+  if (coords.length <= MAX_SCRATCH_COORDS) {
+    scratchCoords = coords;
+  }
+  if (ends.length <= MAX_SCRATCH_ENDS) {
+    scratchEnds = ends;
+  }
+}
+
+function mapRing<T>(
+  coords: number[],
+  start: number,
+  end: number,
+  transform?: (x: number, y: number) => T,
+): (Point | T)[] {
+  const ring = new Array<Point | T>((end - start) >> 1);
+  if (transform) {
+    for (let i = start, j = 0; i < end; i += 2, j++) {
+      ring[j] = transform(coords[i], coords[i + 1]);
+    }
+  } else {
+    for (let i = start, j = 0; i < end; i += 2, j++) {
+      ring[j] = new Point(coords[i], coords[i + 1]);
+    }
+  }
+  return ring;
+}
+
+function signedAreaFlat(coords: number[], start: number, end: number): number {
+  let sum = 0;
+  for (let i = start, j = end - 2; i < end; j = i, i += 2) {
+    sum += (coords[j] - coords[i]) * (coords[i + 1] + coords[j + 1]);
+  }
+  return sum;
+}
+
 // A feature in a layer.
 export class Feature<P = Record<string, PropValues>> {
   readonly id?: string;
@@ -216,54 +264,187 @@ export class Feature<P = Record<string, PropValues>> {
     }
   }
 
-  // Lazily loads the geometry.
-  loadGeometry(): Point[][] {
+  private readGeometry(coords: number[], ends: number[]): number {
+    const reader = this.reader;
+    reader.pos = this.geometryOffset;
+
+    const end = reader.uint32() + reader.pos;
+    let x = 0;
+    let y = 0;
+    let ci = 0;
+    let ei = 0;
+    let ringStart = -1;
+
+    while (reader.pos < end) {
+      const cmdLen = reader.uint32();
+      const cmd = cmdLen & 0x7;
+      let count = cmdLen >>> 3;
+
+      if (cmd == Command.MoveTo) {
+        while (count-- > 0 && reader.pos < end) {
+          x += reader.sint32();
+          y += reader.sint32();
+          if (ringStart >= 0) {
+            ends[ei++] = ci;
+          }
+          ringStart = ci;
+          coords[ci++] = x;
+          coords[ci++] = y;
+        }
+      } else if (cmd == Command.LineTo) {
+        if (ringStart >= 0) {
+          while (count-- > 0 && reader.pos < end) {
+            x += reader.sint32();
+            y += reader.sint32();
+            coords[ci++] = x;
+            coords[ci++] = y;
+          }
+        } else {
+          while (count-- > 0 && reader.pos < end) {
+            x += reader.sint32();
+            y += reader.sint32();
+          }
+        }
+      } else if (cmd == Command.ClosePath) {
+        if (ringStart >= 0) {
+          const x0 = coords[ringStart];
+          const y0 = coords[ringStart + 1];
+          while (count-- > 0) {
+            coords[ci++] = x0;
+            coords[ci++] = y0;
+          }
+        }
+      }
+    }
+
+    if (ringStart >= 0) {
+      ends[ei++] = ci;
+    }
+
+    return ei;
+  }
+
+  private buildPoints<T>(transform?: (x: number, y: number) => T): (Point | T)[] {
     if (!this.geometryOffset) {
       return [];
     }
-    this.reader.pos = this.geometryOffset;
+    const coords = scratchCoords || [];
+    const ends = scratchEnds || [];
+    scratchCoords = scratchEnds = null;
+    try {
+      const numPoints = this.readGeometry(coords, ends);
+      const points = new Array<Point | T>(numPoints);
+      let start = 0;
+      if (transform) {
+        for (let r = 0; r < numPoints; r++) {
+          points[r] = transform(coords[start], coords[start + 1]);
+          start = ends[r];
+        }
+      } else {
+        for (let r = 0; r < numPoints; r++) {
+          points[r] = new Point(coords[start], coords[start + 1]);
+          start = ends[r];
+        }
+      }
+      return points;
+    } finally {
+      releaseScratch(coords, ends);
+    }
+  }
 
-    const end = this.reader.uint32() + this.reader.pos;
-    let command = 1;
-    let length = 0;
-    let x = 0;
-    let y = 0;
-    const lines: Point[][] = [];
-    let line: Point[] | null = null;
+  private buildRings<T>(transform?: (x: number, y: number) => T): (Point | T)[][] {
+    if (!this.geometryOffset) {
+      return [];
+    }
+    const coords = scratchCoords || [];
+    const ends = scratchEnds || [];
+    scratchCoords = scratchEnds = null;
+    try {
+      const numRings = this.readGeometry(coords, ends);
+      const lines = new Array<(Point | T)[]>(numRings);
+      let start = 0;
+      for (let r = 0; r < numRings; r++) {
+        const end = ends[r];
+        lines[r] = mapRing(coords, start, end, transform);
+        start = end;
+      }
+      return lines;
+    } finally {
+      releaseScratch(coords, ends);
+    }
+  }
 
-    while (this.reader.pos < end) {
-      if (length <= 0) {
-        const commandLen = this.reader.uint32();
-        command = commandLen & 0x7;
-        length = commandLen >>> 3;
+  private buildPolygons<T>(transform?: (x: number, y: number) => T): (Point | T)[][][] {
+    if (!this.geometryOffset) {
+      return [[]];
+    }
+    const coords = scratchCoords || [];
+    const ends = scratchEnds || [];
+    scratchCoords = scratchEnds = null;
+    try {
+      const numRings = this.readGeometry(coords, ends);
+      if (numRings == 0) {
+        return [[]];
+      }
+      if (numRings == 1) {
+        return [[mapRing(coords, 0, ends[0], transform)]];
       }
 
-      --length;
+      const polygons: (Point | T)[][][] = [];
+      let polygon: (Point | T)[][] | null = null;
+      let start = 0;
 
-      if (command == Command.MoveTo || command == Command.LineTo) {
-        x += this.reader.sint32();
-        y += this.reader.sint32();
-
-        if (command == Command.MoveTo) {
-          if (line) {
-            lines.push(line);
+      for (let r = 0; r < numRings; r++) {
+        const end = ends[r];
+        const area = signedAreaFlat(coords, start, end);
+        if (area != 0) {
+          if (area > 0) {
+            if (polygon) {
+              polygons.push(polygon);
+            }
+            polygon = [mapRing(coords, start, end, transform)];
+          } else if (polygon) {
+            polygon.push(mapRing(coords, start, end, transform));
           }
-          line = [];
         }
-
-        line?.push(new Point(x, y));
-      } else if (command == Command.ClosePath) {
-        if (line) {
-          line.push(new Point(line[0].x, line[0].y));
-        }
+        start = end;
       }
-    }
 
-    if (line) {
-      lines.push(line);
-    }
+      if (polygon) {
+        polygons.push(polygon);
+      }
 
-    return lines;
+      return polygons;
+    } finally {
+      releaseScratch(coords, ends);
+    }
+  }
+
+  // Lazily loads the geometry as a flat coordinate buffer.
+  loadFlatGeometry(): FlatGeometry {
+    if (!this.geometryOffset) {
+      return { coords: [], ends: [] };
+    }
+    const coords = scratchCoords || [];
+    const ends = scratchEnds || [];
+    scratchCoords = scratchEnds = null;
+    try {
+      const numRings = this.readGeometry(coords, ends);
+      const numCoords = numRings ? ends[numRings - 1] : 0;
+      return {
+        coords: coords.slice(0, numCoords),
+        ends: ends.slice(0, numRings),
+      };
+    } finally {
+      releaseScratch(coords, ends);
+    }
+  }
+
+  // Lazily loads the geometry.
+  loadGeometry(): Point[][];
+  loadGeometry<T>(transform: (x: number, y: number) => T): T[][];
+  loadGeometry<T>(transform?: (x: number, y: number) => T): (Point | T)[][] {
+    return this.buildRings(transform);
   }
 
   // Returns the bounding box of a geometry as `[xMin, yMin, xMax, yMax]`.
@@ -277,30 +458,27 @@ export class Feature<P = Record<string, PropValues>> {
       return [xMin, yMin, xMax, yMax];
     }
 
-    this.reader.pos = this.geometryOffset;
+    const reader = this.reader;
+    reader.pos = this.geometryOffset;
 
-    const end = this.reader.uint32() + this.reader.pos;
-    let command = 0;
-    let count = 0;
+    const end = reader.uint32() + reader.pos;
     let x = 0;
     let y = 0;
 
-    while (this.reader.pos < end) {
-      if (count <= 0) {
-        const commandInteger = this.reader.uint32();
-        command = commandInteger & 0x7;
-        count = commandInteger >>> 3;
-      }
+    while (reader.pos < end) {
+      const cmdLen = reader.uint32();
+      const cmd = cmdLen & 0x7;
+      let count = cmdLen >>> 3;
 
-      --count;
-
-      if (command == Command.MoveTo || command == Command.LineTo) {
-        x += this.reader.sint32();
-        y += this.reader.sint32();
-        xMax = Math.max(x, xMax);
-        xMin = Math.min(x, xMin);
-        yMax = Math.max(y, yMax);
-        yMin = Math.min(y, yMin);
+      if (cmd == Command.MoveTo || cmd == Command.LineTo) {
+        while (count-- > 0 && reader.pos < end) {
+          x += reader.sint32();
+          y += reader.sint32();
+          xMax = Math.max(x, xMax);
+          xMin = Math.min(x, xMin);
+          yMax = Math.max(y, yMax);
+          yMin = Math.min(y, yMin);
+        }
       }
     }
 
@@ -317,36 +495,33 @@ export class Feature<P = Record<string, PropValues>> {
     const size = this.extent * Math.pow(2, zoom);
     const x0 = this.extent * x;
     const y0 = this.extent * y;
+    const degScale = 360 / size;
     let coordinates: any;
     let type = '';
 
-    const project = (points: Point[]): Position[] => {
-      return points.map((point) => {
-        const y2 = 180 - ((point.y + y0) * 360) / size;
-        return [((point.x + x0) * 360) / size - 180, (360 / Math.PI) * Math.atan(Math.exp((y2 * Math.PI) / 180)) - 90];
-      });
+    const project = (px: number, py: number): Position => {
+      const y2 = 180 - (py + y0) * degScale;
+      return [(px + x0) * degScale - 180, RAD_TO_DEG * Math.atan(Math.exp((y2 * Math.PI) / 180)) - 90];
     };
 
     switch (this.type) {
       case FeatureType.POINT:
         type = 'Point';
-        coordinates = project(this.asPoints()!);
+        coordinates = this.buildPoints(project);
         break;
 
       case FeatureType.LINESTRING:
         type = 'LineString';
-        coordinates = this.asLines()!.map((line) => project(line));
+        coordinates = this.buildRings(project);
         break;
 
       case FeatureType.POLYGON:
         type = 'Polygon';
-        coordinates = this.asPolygons()!;
-        coordinates.forEach((rings: Point[][], polygonIndex: number) => {
-          rings.forEach((ring: Point[], ringIndex: number) => {
-            coordinates[polygonIndex][ringIndex] = project(ring);
-          });
-        });
+        coordinates = this.buildPolygons(project);
         break;
+
+      default:
+        throw new Error('Unknown feature type');
     }
 
     if (coordinates.length == 1) {
@@ -372,13 +547,17 @@ export class Feature<P = Record<string, PropValues>> {
   }
 
   // Returns a list of points or null if the type is not POINT.
-  asPoints(): Point[] | null {
-    return this.type == FeatureType.POINT ? this.loadGeometry().map((points: Point[]) => points[0]) : null;
+  asPoints(): Point[] | null;
+  asPoints<T>(transform: (x: number, y: number) => T): T[] | null;
+  asPoints<T>(transform?: (x: number, y: number) => T): (Point | T)[] | null {
+    return this.type == FeatureType.POINT ? this.buildPoints(transform) : null;
   }
 
   // Returns a list of lines or null if the type is not LINESTRING.
-  asLines(): Point[][] | null {
-    return this.type == FeatureType.LINESTRING ? this.loadGeometry() : null;
+  asLines(): Point[][] | null;
+  asLines<T>(transform: (x: number, y: number) => T): T[][] | null;
+  asLines<T>(transform?: (x: number, y: number) => T): (Point | T)[][] | null {
+    return this.type == FeatureType.LINESTRING ? this.buildRings(transform) : null;
   }
 
   // Returns a list of polygons or null if the type is not POLYGON.
@@ -386,8 +565,10 @@ export class Feature<P = Record<string, PropValues>> {
   // Each polygon could be composed of one or more rings:
   // - The first ring is the exterior ring,
   // - following rings are interior rings (=holes).
-  asPolygons(): Point[][][] | null {
-    return this.type == FeatureType.POLYGON ? classifyRings(this.loadGeometry()) : null;
+  asPolygons(): Point[][][] | null;
+  asPolygons<T>(transform: (x: number, y: number) => T): T[][][] | null;
+  asPolygons<T>(transform?: (x: number, y: number) => T): (Point | T)[][][] | null {
+    return this.type == FeatureType.POLYGON ? this.buildPolygons(transform) : null;
   }
 }
 
