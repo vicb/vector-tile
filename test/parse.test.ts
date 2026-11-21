@@ -1,3 +1,4 @@
+/** @jest-environment node */
 import fs from 'fs';
 import type { Feature as GeoJSONFeatureType, MultiPolygon, Polygon } from 'geojson';
 
