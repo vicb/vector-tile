@@ -16,7 +16,7 @@ import type {
 } from 'geojson';
 
 export type LongType = "number" | "string" | "bigint";
-export type PropValues = string | number | boolean | bigint | null;
+export type PropValues = string | number | boolean | bigint;
 export type Coord2D = [number, number];
 
 export interface FlatGeometry {
@@ -128,7 +128,7 @@ export class Layer<P = Record<string, PropValues>> implements Iterable<Feature<P
   private decodeValue(): PropValues {
     const reader = this.reader;
     const end = reader.uint32() + reader.pos;
-    let value: PropValues = null;
+    let value: PropValues | null = null;
     while (reader.pos < end) {
       const tag = reader.uint32();
       switch (tag) {
@@ -156,6 +156,9 @@ export class Layer<P = Record<string, PropValues>> implements Iterable<Feature<P
         default:
           reader.skip(tag & 7);
       }
+    }
+    if (value === null) {
+      throw new Error('unknown feature value');
     }
     return value;
   }

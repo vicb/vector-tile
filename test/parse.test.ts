@@ -716,26 +716,24 @@ describe('upstream bug fixes', () => {
     expect(building[0][4]).toEqual({ x: 2039, y: -32 });
   });
 
-  it('handles Value messages with only unknown fields or trailing unknown fields without hanging', () => {
+  it('throws on unknown-only Value messages while preserving values with extension fields', () => {
     const unknownOnlyVal = strField(99, 'only-unknown');
-    const wrappedVal = [...varintField(98, 123), ...strField(1, 'kept'), ...strField(99, 'trailing')];
-    const featBytes = [
+    const featA = [
       ...varintField(1, 1),
-      ...lenField(2, [0, 0, 1, 1]),
+      ...lenField(2, [0, 0]),
       ...varintField(3, FeatureType.POINT),
       ...lenField(4, [9, 0, 0]),
     ];
-    const layerBytes = [
-      ...strField(1, 'vals'),
-      ...strField(3, 'a'),
-      ...strField(3, 'b'),
-      ...lenField(4, unknownOnlyVal),
-      ...lenField(4, wrappedVal),
-      ...lenField(2, featBytes),
-    ];
-    const tile = new VectorTile(new Uint8Array(lenField(3, layerBytes)));
-    const feature = tile.layers.vals.feature(0);
-    expect(feature.properties.a).toBeNull();
+    const unknownTileBytes = new Uint8Array(
+      lenField(3, [...strField(1, 'vals'), ...strField(3, 'a'), ...lenField(4, unknownOnlyVal), ...lenField(2, featA)]),
+    );
+    expect(() => new VectorTile(unknownTileBytes)).toThrow('unknown feature value');
+
+    const wrappedVal = [...varintField(98, 123), ...strField(1, 'kept'), ...strField(99, 'trailing')];
+    const wrappedTileBytes = new Uint8Array(
+      lenField(3, [...strField(1, 'vals'), ...strField(3, 'b'), ...lenField(4, wrappedVal), ...lenField(2, featA)]),
+    );
+    const feature = new VectorTile(wrappedTileBytes).layers.vals.feature(0);
     expect(feature.properties.b).toBe('kept');
   });
 
