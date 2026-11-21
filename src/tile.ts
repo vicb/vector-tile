@@ -45,7 +45,7 @@ let textDecoder: TextDecoder | undefined;
 // Contains all the non-empty layers indexed by name.
 export class VectorTile {
   // List of non-empty layers.
-  readonly layers: { [key: string]: Layer } = {};
+  readonly layers: { [key: string]: Layer } = Object.create(null);
 
   // The constructor takes a byte buffer.
   constructor(bytes: Uint8Array, longType: LongType = "number") {
@@ -68,9 +68,7 @@ export class VectorTile {
   }
 
   getLayer<P = Record<string, PropValues>>(name: string): Layer<P> | undefined {
-    return Object.prototype.hasOwnProperty.call(this.layers, name)
-      ? (this.layers[name] as unknown as Layer<P>)
-      : undefined;
+    return this.layers[name] as unknown as Layer<P> | undefined;
   }
 }
 
@@ -236,7 +234,7 @@ function signedAreaFlat(coords: number[], start: number, end: number): number {
 export class Feature<P = Record<string, PropValues>> {
   readonly id?: string;
   readonly type: FeatureType = FeatureType.UNKNOWN;
-  readonly properties: P = {} as P;
+  readonly properties: P = Object.create(null);
 
   private geometryOffset = 0;
 
