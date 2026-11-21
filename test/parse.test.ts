@@ -1,6 +1,7 @@
 import fs from 'fs';
+import type { Feature as GeoJSONFeatureType, MultiPolygon, Polygon } from 'geojson';
 
-import { FeatureType, VectorTile } from '../src/index';
+import { FeatureType, GeoJSONFeature, VectorTile } from '../src/index';
 
 describe('FeatureType', () => {
   it('is available as a runtime object', () => {
@@ -124,7 +125,7 @@ describe('parses vector tile', () => {
 });
 
 describe('GeoJSON', () => {
-  function geoJSONFromFixture(name: string): any {
+  function geoJSONFromFixture(name: string): GeoJSONFeature {
     const tile = new VectorTile(fs.readFileSync(__dirname + '/fixtures/' + name + '.pbf'));
     return tile.layers.geojson.feature(0).toGeoJSON(0, 0, 0);
   }
@@ -305,6 +306,39 @@ describe('regression', () => {
         expect(() => layer.feature(i).loadGeometry()).not.toThrow();
       }
     }
+  });
+});
+
+describe('TypeScript types', () => {
+  interface ParkProps {
+    name: string;
+    localrank: number;
+  }
+
+  it('provides strongly-typed GeoJSON and generic properties', () => {
+    const tile = new VectorTile(fs.readFileSync(__dirname + '/fixtures/14-8801-5371.vector.pbf'));
+    const defaultGeo: GeoJSONFeatureType = tile.layers.poi_label.feature(11).toGeoJSON(8801, 5371, 14);
+    if (defaultGeo.geometry.type === 'Point') {
+      expect(defaultGeo.geometry.coordinates.length).toBe(2);
+    } else {
+      throw new Error('Expected Point geometry');
+    }
+
+    const customGeo = tile.layers.poi_label.feature(11).toGeoJSON<ParkProps>(8801, 5371, 14);
+    expect(customGeo.properties.name).toBe('Mauerpark');
+    expect(customGeo.properties.localrank).toBe(1);
+
+    const feature = tile.layers.poi_label.feature<ParkProps>(11);
+    expect(feature.properties.name).toBe('Mauerpark');
+    const inferredGeo = feature.toGeoJSON(8801, 5371, 14);
+    expect(inferredGeo.properties.localrank).toBe(1);
+
+    const buildingGeo = tile.layers.building
+      .feature<{ osm_id: number }>(0)
+      .toGeoJSON<{ osm_id: number }, Polygon | MultiPolygon>(8801, 5371, 14);
+    expect(buildingGeo.properties.osm_id).toBe(1000267229912);
+    expect(buildingGeo.geometry.type).toBe('Polygon');
+    expect(buildingGeo.geometry.coordinates.length).toBe(1);
   });
 });
 

@@ -3,9 +3,30 @@
 // See https://github.com/mapbox/vector-tile-spec.
 
 import { BinaryReader, PbLong, PbULong } from '@protobuf-ts/runtime';
+import type {
+  Feature as GeoJSONFeature,
+  Geometry as GeoJSONGeometry,
+  LineString as GeoJSONLineString,
+  MultiLineString as GeoJSONMultiLineString,
+  MultiPoint as GeoJSONMultiPoint,
+  MultiPolygon as GeoJSONMultiPolygon,
+  Point as GeoJSONPoint,
+  Polygon as GeoJSONPolygon,
+  Position,
+} from 'geojson';
 
 export type LongType = "number" | "string" | "bigint";
 export type PropValues = string | number | boolean | bigint | null;
+
+export type GeoJSONFeatureGeometry =
+  | GeoJSONPoint
+  | GeoJSONMultiPoint
+  | GeoJSONLineString
+  | GeoJSONMultiLineString
+  | GeoJSONPolygon
+  | GeoJSONMultiPolygon;
+
+export type { GeoJSONFeature };
 
 export class Point {
   constructor(public readonly x: number, public readonly y: number) { }
@@ -35,7 +56,7 @@ export class VectorTile {
 }
 
 // A layer of a vector tile.
-export class Layer {
+export class Layer<P = Record<string, PropValues>> {
   readonly name: string = '';
   readonly version: number = 0;
   readonly extent: number = 0;
@@ -69,13 +90,13 @@ export class Layer {
   }
 
   // Returns the features at the given `index`.
-  feature(index: number): Feature {
+  feature<FP = P>(index: number): Feature<FP> {
     if (index < 0 || index >= this.featureOffsets.length) {
       throw new Error('out of bounds');
     }
     this.reader.pos = this.featureOffsets[index];
     const end = this.reader.uint32() + this.reader.pos;
-    return new Feature(this.reader, end, this.keys, this.values, this.extent);
+    return new Feature<FP>(this.reader, end, this.keys, this.values, this.extent);
   }
 
   private decodeValue(): PropValues {
@@ -133,10 +154,10 @@ const enum Command {
 }
 
 // A feature in a layer.
-export class Feature {
+export class Feature<P = Record<string, PropValues>> {
   readonly id?: string;
   readonly type: FeatureType = FeatureType.UNKNOWN;
-  readonly properties: { [key: string]: PropValues } = {};
+  readonly properties: P = {} as P;
 
   private geometryOffset = 0;
 
@@ -156,7 +177,7 @@ export class Feature {
         while (reader.pos < end) {
           const key = keys[reader.uint32()];
           const value = values[reader.uint32()];
-          this.properties[key] = value;
+          (this.properties as unknown as Record<string, PropValues>)[key] = value;
         }
       } else if (fieldId == 3) {
         this.type = reader.uint32() as FeatureType;
@@ -252,14 +273,18 @@ export class Feature {
 
   // Returns a GeoJSON representation of the feature. 
   // x, y, and zoom refer to the tile coordinates.
-  toGeoJSON(x: number, y: number, zoom: number): unknown {
+  toGeoJSON<Props = P, Geom extends GeoJSONGeometry | null = GeoJSONFeatureGeometry>(
+    x: number,
+    y: number,
+    zoom: number,
+  ): GeoJSONFeature<Geom, Props> {
     const size = this.extent * Math.pow(2, zoom);
     const x0 = this.extent * x;
     const y0 = this.extent * y;
     let coordinates: any;
     let type = '';
 
-    const project = (points: Point[]): Array<[number, number]> => {
+    const project = (points: Point[]): Position[] => {
       return points.map((point) => {
         const y2 = 180 - ((point.y + y0) * 360) / size;
         return [((point.x + x0) * 360) / size - 180, (360 / Math.PI) * Math.atan(Math.exp((y2 * Math.PI) / 180)) - 90];
@@ -294,14 +319,14 @@ export class Feature {
       type = 'Multi' + type;
     }
 
-    const result: any = {
+    const result = {
       type: 'Feature',
       geometry: {
         type,
         coordinates,
       },
       properties: this.properties,
-    };
+    } as unknown as GeoJSONFeature<Geom, Props>;
 
     if (this.id != null) {
       result.id = this.id;
