@@ -698,6 +698,61 @@ describe('upstream bug fixes', () => {
     expect(() => feature.loadFlatGeometry()).toThrow('unknown command 3');
     expect(() => feature.bbox()).toThrow('unknown command 3');
   });
+
+  it('ClosePath creates a distinct Point instance for the closing vertex', () => {
+    const tile = new VectorTile(fs.readFileSync(__dirname + '/fixtures/14-8801-5371.vector.pbf'));
+    const building = tile.layers.building.feature(0).loadGeometry();
+    expect(building).toEqual([
+      [
+        { x: 2039, y: -32 },
+        { x: 2035, y: -31 },
+        { x: 2032, y: -31 },
+        { x: 2032, y: -32 },
+        { x: 2039, y: -32 },
+      ],
+    ]);
+    expect(building[0][0]).not.toBe(building[0][4]);
+    (building[0][0] as { x: number; y: number }).x = 1;
+    (building[0][0] as { x: number; y: number }).y = 2;
+    expect(building[0][4]).toEqual({ x: 2039, y: -32 });
+  });
+
+  it('handles Value messages with only unknown fields or trailing unknown fields without hanging', () => {
+    const unknownOnlyVal = strField(99, 'only-unknown');
+    const wrappedVal = [...varintField(98, 123), ...strField(1, 'kept'), ...strField(99, 'trailing')];
+    const featBytes = [
+      ...varintField(1, 1),
+      ...lenField(2, [0, 0, 1, 1]),
+      ...varintField(3, FeatureType.POINT),
+      ...lenField(4, [9, 0, 0]),
+    ];
+    const layerBytes = [
+      ...strField(1, 'vals'),
+      ...strField(3, 'a'),
+      ...strField(3, 'b'),
+      ...lenField(4, unknownOnlyVal),
+      ...lenField(4, wrappedVal),
+      ...lenField(2, featBytes),
+    ];
+    const tile = new VectorTile(new Uint8Array(lenField(3, layerBytes)));
+    const feature = tile.layers.vals.feature(0);
+    expect(feature.properties.a).toBeNull();
+    expect(feature.properties.b).toBe('kept');
+  });
+
+  it('handles empty tile, empty layer, and empty feature', () => {
+    const emptyTile = new VectorTile(new Uint8Array(0));
+    expect(Object.keys(emptyTile.layers)).toEqual([]);
+
+    const emptyLayerTile = new VectorTile(new Uint8Array(lenField(3, strField(1, 'empty'))));
+    expect(emptyLayerTile.layers.empty).toBeUndefined();
+
+    const emptyFeatLayer = new Uint8Array(lenField(3, [...strField(1, 'l'), ...lenField(2, [])]));
+    const feat = new VectorTile(emptyFeatLayer).layers.l.feature(0);
+    expect(feat.type).toBe(FeatureType.UNKNOWN);
+    expect(Object.keys(feat.properties)).toEqual([]);
+    expect(feat.loadGeometry()).toEqual([]);
+  });
 });
 
 // Custom matchers
