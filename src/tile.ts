@@ -53,10 +53,16 @@ export class VectorTile {
       }
     }
   }
+
+  getLayer<P = Record<string, PropValues>>(name: string): Layer<P> | undefined {
+    return Object.prototype.hasOwnProperty.call(this.layers, name)
+      ? (this.layers[name] as unknown as Layer<P>)
+      : undefined;
+  }
 }
 
 // A layer of a vector tile.
-export class Layer<P = Record<string, PropValues>> {
+export class Layer<P = Record<string, PropValues>> implements Iterable<Feature<P>> {
   readonly name: string = '';
   readonly version: number = 0;
   readonly extent: number = 0;
@@ -97,6 +103,14 @@ export class Layer<P = Record<string, PropValues>> {
     this.reader.pos = this.featureOffsets[index];
     const end = this.reader.uint32() + this.reader.pos;
     return new Feature<FP>(this.reader, end, this.keys, this.values, this.extent);
+  }
+
+  [Symbol.iterator](): Iterator<Feature<P>> {
+    let index = 0;
+    return {
+      next: (): IteratorResult<Feature<P>> =>
+        index < this.length ? { value: this.feature(index++), done: false } : { value: undefined, done: true },
+    };
   }
 
   private decodeValue(): PropValues {
