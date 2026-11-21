@@ -34,8 +34,8 @@ export function classifyRings(rings: Point[][]): Point[][][] {
         polygons.push(polygon);
       }
       polygon = [rings[i]];
-    } else if (polygon) {
-      polygon.push(rings[i]);
+    } else {
+      polygon?.push(rings[i]);
     }
   }
 
@@ -53,11 +53,16 @@ export function classifyRings(rings: Point[][]): Point[][][] {
  * @returns The signed area (positive for CW, negative for CCW).
  */
 export function signedArea(ring: Point[]): number {
+  const len = ring.length;
+  if (len < 3) {
+    return 0;
+  }
   let sum = 0;
-  for (let i = 0, len = ring.length, j = len - 1; i < len; j = i++) {
-    const point1 = ring[i];
-    const point2 = ring[j];
-    sum += (point2.x - point1.x) * (point1.y + point2.y);
+  let p2 = ring[len - 1];
+  for (let i = 0; i < len; i++) {
+    const p1 = ring[i];
+    sum += (p2.x - p1.x) * (p1.y + p2.y);
+    p2 = p1;
   }
   return sum;
 }
