@@ -117,12 +117,14 @@ export class Layer {
   }
 }
 
-export const enum FeatureType {
-  UNKNOWN = 0,
-  POINT = 1,
-  LINESTRING = 2,
-  POLYGON = 3,
-}
+export const FeatureType = {
+  UNKNOWN: 0,
+  POINT: 1,
+  LINESTRING: 2,
+  POLYGON: 3,
+} as const;
+
+export type FeatureType = (typeof FeatureType)[keyof typeof FeatureType];
 
 const enum Command {
   MoveTo = 1,
@@ -157,7 +159,7 @@ export class Feature {
           this.properties[key] = value;
         }
       } else if (fieldId == 3) {
-        this.type = reader.uint32();
+        this.type = reader.uint32() as FeatureType;
       } else if (fieldId == 4) {
         this.geometryOffset = reader.pos;
         reader.skip(wireType);
@@ -275,7 +277,7 @@ export class Feature {
         coordinates = this.asLines()!.map((line) => project(line));
         break;
 
-      case 3:
+      case FeatureType.POLYGON:
         type = 'Polygon';
         coordinates = this.asPolygons()!;
         coordinates.forEach((rings: Point[][], polygonIndex: number) => {

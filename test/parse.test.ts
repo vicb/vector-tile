@@ -2,6 +2,17 @@ import fs from 'fs';
 
 import { FeatureType, VectorTile } from '../src/index';
 
+describe('FeatureType', () => {
+  it('is available as a runtime object', () => {
+    expect(FeatureType).toEqual({
+      UNKNOWN: 0,
+      POINT: 1,
+      LINESTRING: 2,
+      POLYGON: 3,
+    });
+  });
+});
+
 describe('parses vector tile', () => {
   const data = fs.readFileSync(__dirname + '/fixtures/14-8801-5371.vector.pbf');
   const tile = new VectorTile(data);
