@@ -266,6 +266,9 @@ export class Feature<P = Record<string, PropValues>> {
   }
 
   private readGeometry(coords: number[], ends: number[]): number {
+    if (!this.geometryOffset) {
+      throw new Error('feature has no geometry');
+    }
     const reader = this.reader;
     reader.pos = this.geometryOffset;
 
@@ -331,9 +334,6 @@ export class Feature<P = Record<string, PropValues>> {
   }
 
   private buildPoints<T>(transform?: (x: number, y: number) => T): (Point | T)[] {
-    if (!this.geometryOffset) {
-      return [];
-    }
     const coords = scratchCoords || [];
     const ends = scratchEnds || [];
     scratchCoords = scratchEnds = null;
@@ -359,9 +359,6 @@ export class Feature<P = Record<string, PropValues>> {
   }
 
   private buildRings<T>(transform?: (x: number, y: number) => T): (Point | T)[][] {
-    if (!this.geometryOffset) {
-      return [];
-    }
     const coords = scratchCoords || [];
     const ends = scratchEnds || [];
     scratchCoords = scratchEnds = null;
@@ -381,9 +378,6 @@ export class Feature<P = Record<string, PropValues>> {
   }
 
   private buildPolygons<T>(transform?: (x: number, y: number) => T): (Point | T)[][][] {
-    if (!this.geometryOffset) {
-      return [[]];
-    }
     const coords = scratchCoords || [];
     const ends = scratchEnds || [];
     scratchCoords = scratchEnds = null;
@@ -432,9 +426,6 @@ export class Feature<P = Record<string, PropValues>> {
 
   // Lazily loads the geometry as a flat coordinate buffer.
   loadFlatGeometry(): FlatGeometry {
-    if (!this.geometryOffset) {
-      return { coords: [], ends: [] };
-    }
     const coords = scratchCoords || [];
     const ends = scratchEnds || [];
     scratchCoords = scratchEnds = null;
@@ -459,14 +450,14 @@ export class Feature<P = Record<string, PropValues>> {
 
   // Returns the bounding box of a geometry as `[xMin, yMin, xMax, yMax]`.
   bbox(): [number, number, number, number] {
+    if (!this.geometryOffset) {
+      throw new Error('feature has no geometry');
+    }
+
     let xMin = Number.MAX_SAFE_INTEGER;
     let xMax = Number.MIN_SAFE_INTEGER;
     let yMin = Number.MAX_SAFE_INTEGER;
     let yMax = Number.MIN_SAFE_INTEGER;
-
-    if (!this.geometryOffset) {
-      return [xMin, yMin, xMax, yMax];
-    }
 
     const reader = this.reader;
     reader.pos = this.geometryOffset;
