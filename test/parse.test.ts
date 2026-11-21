@@ -1,9 +1,12 @@
-/** @jest-environment node */
-import fs from 'fs';
+import fs from 'node:fs';
+import path from 'node:path';
 import type { Feature as GeoJSONFeatureType, MultiPolygon, Polygon } from 'geojson';
+import { describe, expect, it } from 'vitest';
 
 import { Coord2D, FeatureType, GeoJSONFeature, Layer, Point, VectorTile } from '../src/index';
 import { classifyRings } from '../src/tile';
+
+const FIXTURES_DIR = path.resolve(import.meta.dirname, 'fixtures');
 
 describe('FeatureType', () => {
   it('is available as a runtime object', () => {
@@ -17,7 +20,7 @@ describe('FeatureType', () => {
 });
 
 describe('parses vector tile', () => {
-  const data = fs.readFileSync(__dirname + '/fixtures/14-8801-5371.vector.pbf');
+  const data = fs.readFileSync(FIXTURES_DIR + '/14-8801-5371.vector.pbf');
   const tile = new VectorTile(data);
 
   it('has all the layers', () => {
@@ -46,7 +49,7 @@ describe('parses vector tile', () => {
 
     const park = tile.layers.poi_label.feature(11);
     expect(park.bbox()).toEqual([3898, 1731, 3898, 1731]);
-    expect(park.id).toBe("3000003150561");
+    expect(park.id).toBe('3000003150561');
     expect(park.properties.name).toBe('Mauerpark');
     expect(park.properties.type).toBe('Park');
     expect(park.type).toBe(FeatureType.POINT);
@@ -66,7 +69,7 @@ describe('parses vector tile', () => {
   it('converts to GeoJSON', () => {
     expect(tile.layers.poi_label.feature(11).toGeoJSON(8801, 5371, 14)).toEqual({
       type: 'Feature',
-      id: "3000003150561",
+      id: '3000003150561',
       properties: {
         localrank: 1,
         maki: 'park',
@@ -88,7 +91,7 @@ describe('parses vector tile', () => {
 
     expect(tile.layers.bridge.feature(0).toGeoJSON(8801, 5371, 14)).toEqual({
       type: 'Feature',
-      id: "238162948",
+      id: '238162948',
       properties: {
         class: 'service',
         oneway: 0,
@@ -106,7 +109,7 @@ describe('parses vector tile', () => {
 
     expect(tile.layers.building.feature(0).toGeoJSON(8801, 5371, 14)).toEqual({
       type: 'Feature',
-      id: "1000267229912",
+      id: '1000267229912',
       properties: {
         osm_id: 1000267229912,
       },
@@ -128,7 +131,7 @@ describe('parses vector tile', () => {
 
 describe('GeoJSON', () => {
   function geoJSONFromFixture(name: string): GeoJSONFeature {
-    const tile = new VectorTile(fs.readFileSync(__dirname + '/fixtures/' + name + '.pbf'));
+    const tile = new VectorTile(fs.readFileSync(FIXTURES_DIR + '/' + name + '.pbf'));
     return tile.layers.geojson.feature(0).toGeoJSON(0, 0, 0);
   }
 
@@ -288,19 +291,19 @@ describe('GeoJSON', () => {
 
 describe('regression', () => {
   it('https://github.com/mapbox/vector-tile-js/issues/15', () => {
-    const data = fs.readFileSync(__dirname + '/fixtures/lots-of-tags.vector.pbf');
+    const data = fs.readFileSync(FIXTURES_DIR + '/lots-of-tags.vector.pbf');
     const tile = new VectorTile(data);
     expect(() => tile.layers['stuttgart-rails'].feature(0)).not.toThrow();
   });
 
   it('https://github.com/mapbox/vector-tile-js/issues/1019', () => {
-    const data = fs.readFileSync(__dirname + '/fixtures/12-1143-1497.vector.pbf');
+    const data = fs.readFileSync(FIXTURES_DIR + '/12-1143-1497.vector.pbf');
     const tile = new VectorTile(data);
     expect(() => tile.layers['water'].feature(1).loadGeometry()).not.toThrow();
   });
 
   it('https://github.com/mapbox/vector-tile-js/issues/60', () => {
-    const data = fs.readFileSync(__dirname + '/fixtures/multipolygon-with-closepath.pbf');
+    const data = fs.readFileSync(FIXTURES_DIR + '/multipolygon-with-closepath.pbf');
     const tile = new VectorTile(data);
     for (const id in tile.layers) {
       const layer = tile.layers[id];
@@ -318,7 +321,7 @@ describe('TypeScript types', () => {
   }
 
   it('provides strongly-typed GeoJSON and generic properties', () => {
-    const tile = new VectorTile(fs.readFileSync(__dirname + '/fixtures/14-8801-5371.vector.pbf'));
+    const tile = new VectorTile(fs.readFileSync(FIXTURES_DIR + '/14-8801-5371.vector.pbf'));
     const defaultGeo: GeoJSONFeatureType = tile.layers.poi_label.feature(11).toGeoJSON(8801, 5371, 14);
     if (defaultGeo.geometry.type === 'Point') {
       expect(defaultGeo.geometry.coordinates.length).toBe(2);
@@ -345,7 +348,7 @@ describe('TypeScript types', () => {
 });
 
 describe('iteration and accessors', () => {
-  const data = fs.readFileSync(__dirname + '/fixtures/14-8801-5371.vector.pbf');
+  const data = fs.readFileSync(FIXTURES_DIR + '/14-8801-5371.vector.pbf');
   const tile = new VectorTile(data);
 
   it('iterates layer features via Symbol.iterator and Array.from', () => {
@@ -409,7 +412,6 @@ function varintField(fieldId: number, v: number): number[] {
 }
 
 describe('MVT v2 spec hardening and longType', () => {
-
   it('defaults version to 1 and extent to 4096 when omitted', () => {
     const featureBytes = [
       ...varintField(3, FeatureType.POINT),
@@ -460,7 +462,7 @@ describe('MVT v2 spec hardening and longType', () => {
   });
 
   it('returns null from asPoints/asLines/asPolygons on mismatched types', () => {
-    const data = fs.readFileSync(__dirname + '/fixtures/14-8801-5371.vector.pbf');
+    const data = fs.readFileSync(FIXTURES_DIR + '/14-8801-5371.vector.pbf');
     const tile = new VectorTile(data);
     const pointFeat = tile.layers.poi_label.feature(11);
     const lineFeat = tile.layers.road.feature(656);
@@ -483,7 +485,12 @@ describe('MVT v2 spec hardening and longType', () => {
     const valBytes = [(5 << 3) | 0, ...bigValVarint]; // uint_value = field 5
     const featBytes = [(1 << 3) | 0, ...maxUint64Varint, ...lenField(2, [0, 0]), ...varintField(3, FeatureType.POINT)];
 
-    const layerBytes = [...strField(1, 'longs'), ...strField(3, 'n'), ...lenField(4, valBytes), ...lenField(2, featBytes)];
+    const layerBytes = [
+      ...strField(1, 'longs'),
+      ...strField(3, 'n'),
+      ...lenField(4, valBytes),
+      ...lenField(2, featBytes),
+    ];
     const tileBytes = new Uint8Array(lenField(3, layerBytes));
 
     const asString = new VectorTile(tileBytes, 'string').layers.longs.feature(0);
@@ -498,7 +505,12 @@ describe('MVT v2 spec hardening and longType', () => {
 
     const safeValBytes = [...varintField(5, 42)];
     const safeTile = new Uint8Array(
-      lenField(3, [...strField(1, 'longs'), ...strField(3, 'n'), ...lenField(4, safeValBytes), ...lenField(2, featBytes)]),
+      lenField(3, [
+        ...strField(1, 'longs'),
+        ...strField(3, 'n'),
+        ...lenField(4, safeValBytes),
+        ...lenField(2, featBytes),
+      ]),
     );
     const asNumber = new VectorTile(safeTile, 'number').layers.longs.feature(0);
     expect(asNumber.properties.n).toBe(42);
@@ -506,33 +518,35 @@ describe('MVT v2 spec hardening and longType', () => {
 });
 
 describe('flat geometry and transform callbacks', () => {
-  const tile = new VectorTile(fs.readFileSync(__dirname + '/fixtures/14-8801-5371.vector.pbf'));
+  const tile = new VectorTile(fs.readFileSync(FIXTURES_DIR + '/14-8801-5371.vector.pbf'));
   const toTuple = (x: number, y: number): Coord2D => [x, y];
 
   it('loads flat geometry for point, multi-point, line, multi-line, polygon, polygon-with-inner, multi-polygon, and empty', () => {
     const point = tile.layers.poi_label.feature(11).loadFlatGeometry();
     expect(point).toEqual({ coords: [3898, 1731], ends: [2] });
 
-    const mpTile = new VectorTile(fs.readFileSync(__dirname + '/fixtures/multi-point.pbf'));
+    const mpTile = new VectorTile(fs.readFileSync(FIXTURES_DIR + '/multi-point.pbf'));
     expect(mpTile.layers.geojson.feature(0).loadFlatGeometry().ends).toEqual([2, 4]);
 
     const road = tile.layers.road.feature(656).loadFlatGeometry();
     expect(road).toEqual({ coords: [1988, 306, 1808, 321, 1506, 347], ends: [6] });
 
-    const mlTile = new VectorTile(fs.readFileSync(__dirname + '/fixtures/multi-line.pbf'));
+    const mlTile = new VectorTile(fs.readFileSync(FIXTURES_DIR + '/multi-line.pbf'));
     expect(mlTile.layers.geojson.feature(0).loadFlatGeometry().ends.length).toBe(2);
 
-    const pwiTile = new VectorTile(fs.readFileSync(__dirname + '/fixtures/polygon-with-inner.pbf'));
+    const pwiTile = new VectorTile(fs.readFileSync(FIXTURES_DIR + '/polygon-with-inner.pbf'));
     const pwiFlat = pwiTile.layers.geojson.feature(0).loadFlatGeometry();
     expect(pwiFlat.ends).toEqual([10, 20]);
 
-    const mpPolyTile = new VectorTile(fs.readFileSync(__dirname + '/fixtures/multi-polygon.pbf'));
+    const mpPolyTile = new VectorTile(fs.readFileSync(FIXTURES_DIR + '/multi-polygon.pbf'));
     const mpPolyFlat = mpPolyTile.layers.geojson.feature(0).loadFlatGeometry();
     expect(mpPolyFlat.ends).toEqual([8, 16]);
 
     // Empty geometry stream
     const emptyTile = new VectorTile(
-      new Uint8Array(lenField(3, [...strField(1, 'e'), ...lenField(2, [...varintField(3, FeatureType.POINT), ...lenField(4, [])])])),
+      new Uint8Array(
+        lenField(3, [...strField(1, 'e'), ...lenField(2, [...varintField(3, FeatureType.POINT), ...lenField(4, [])])]),
+      ),
     );
     expect(emptyTile.layers.e.feature(0).loadFlatGeometry()).toEqual({ coords: [], ends: [] });
   });
@@ -554,13 +568,13 @@ describe('flat geometry and transform callbacks', () => {
     ]);
     expect(roadFeat.asPoints(toTuple)).toBeNull();
 
-    const pwiTile = new VectorTile(fs.readFileSync(__dirname + '/fixtures/polygon-with-inner.pbf'));
+    const pwiTile = new VectorTile(fs.readFileSync(FIXTURES_DIR + '/polygon-with-inner.pbf'));
     const polyFeat = pwiTile.layers.geojson.feature(0);
     expect(polyFeat.asPolygons(toTuple)).toEqual(
       polyFeat.asPolygons()!.map((poly) => poly.map((ring) => ring.map((p) => [p.x, p.y]))),
     );
 
-    const stackedTile = new VectorTile(fs.readFileSync(__dirname + '/fixtures/stacked-multipolygon.pbf'));
+    const stackedTile = new VectorTile(fs.readFileSync(FIXTURES_DIR + '/stacked-multipolygon.pbf'));
     const stackedFeat = stackedTile.layers.geojson.feature(0);
     expect(stackedFeat.asPolygons(toTuple)).toEqual(
       stackedFeat.asPolygons()!.map((poly) => poly.map((ring) => ring.map((p) => [p.x, p.y]))),
@@ -699,7 +713,7 @@ describe('upstream bug fixes', () => {
   });
 
   it('ClosePath creates a distinct Point instance for the closing vertex', () => {
-    const tile = new VectorTile(fs.readFileSync(__dirname + '/fixtures/14-8801-5371.vector.pbf'));
+    const tile = new VectorTile(fs.readFileSync(FIXTURES_DIR + '/14-8801-5371.vector.pbf'));
     const building = tile.layers.building.feature(0).loadGeometry();
     expect(building).toEqual([
       [
@@ -811,16 +825,15 @@ function approximateDeepEqual(a: any, b: any, epsilon: number): [boolean, string
   return [true, 'ok'];
 }
 
-declare global {
-  namespace jest {
-    interface Matchers<R> {
-      toApproximateDeepEqual(expected: any, epsilon: number): R;
-    }
+declare module 'vitest' {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  interface Assertion<R, T> {
+    toApproximateDeepEqual(expected: any, epsilon?: number): R;
   }
 }
 
 expect.extend({
-  toApproximateDeepEqual: (a: any, b: any, epsilon = 1e-6): jest.CustomMatcherResult => {
+  toApproximateDeepEqual(a: any, b: any, epsilon = 1e-6) {
     const [pass, message] = approximateDeepEqual(a, b, epsilon);
     return { pass, message: () => message };
   },
