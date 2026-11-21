@@ -453,13 +453,10 @@ describe('MVT v2 spec hardening and longType', () => {
     const feat = tile.layers.ext.feature(0);
     expect(feat.id).toBe('42');
     expect(feat.properties.k).toBe('ok');
-    expect(feat.loadGeometry()).toEqual([]);
-    expect(feat.bbox()).toEqual([
-      Number.MAX_SAFE_INTEGER,
-      Number.MAX_SAFE_INTEGER,
-      Number.MIN_SAFE_INTEGER,
-      Number.MIN_SAFE_INTEGER,
-    ]);
+    expect(() => feat.loadGeometry()).toThrow('feature has no geometry');
+    expect(() => feat.loadFlatGeometry()).toThrow('feature has no geometry');
+    expect(() => feat.bbox()).toThrow('feature has no geometry');
+    expect(() => feat.toGeoJSON(0, 0, 0)).toThrow('feature has no geometry');
   });
 
   it('returns null from asPoints/asLines/asPolygons on mismatched types', () => {
@@ -533,8 +530,10 @@ describe('flat geometry and transform callbacks', () => {
     const mpPolyFlat = mpPolyTile.layers.geojson.feature(0).loadFlatGeometry();
     expect(mpPolyFlat.ends).toEqual([8, 16]);
 
-    // Empty geometry
-    const emptyTile = new VectorTile(new Uint8Array(lenField(3, [...strField(1, 'e'), ...lenField(2, varintField(3, FeatureType.POINT))])));
+    // Empty geometry stream
+    const emptyTile = new VectorTile(
+      new Uint8Array(lenField(3, [...strField(1, 'e'), ...lenField(2, [...varintField(3, FeatureType.POINT), ...lenField(4, [])])])),
+    );
     expect(emptyTile.layers.e.feature(0).loadFlatGeometry()).toEqual({ coords: [], ends: [] });
   });
 
@@ -751,7 +750,21 @@ describe('upstream bug fixes', () => {
     const feat = new VectorTile(emptyFeatLayer).layers.l.feature(0);
     expect(feat.type).toBe(FeatureType.UNKNOWN);
     expect(Object.keys(feat.properties)).toEqual([]);
-    expect(feat.loadGeometry()).toEqual([]);
+    expect(() => feat.loadGeometry()).toThrow('feature has no geometry');
+  });
+
+  it('throws a clear error for a feature with no geometry (issue #39)', () => {
+    const featBytes = [...varintField(1, 1), ...varintField(3, FeatureType.POINT)];
+    const layerBytes = [...strField(1, 'layer'), ...lenField(2, featBytes), ...varintField(5, 4096)];
+    const feature = new VectorTile(new Uint8Array(lenField(3, layerBytes))).layers.layer.feature(0);
+
+    expect(() => feature.loadGeometry()).toThrow('feature has no geometry');
+    expect(() => feature.loadFlatGeometry()).toThrow('feature has no geometry');
+    expect(() => feature.bbox()).toThrow('feature has no geometry');
+    expect(() => feature.toGeoJSON(0, 0, 0)).toThrow('feature has no geometry');
+    expect(() => feature.asPoints()).toThrow('feature has no geometry');
+    expect(feature.asLines()).toBeNull();
+    expect(feature.asPolygons()).toBeNull();
   });
 });
 
