@@ -282,6 +282,9 @@ export class Feature<P = Record<string, PropValues>> {
       const cmdLen = reader.uint32();
       const cmd = cmdLen & 0x7;
       let count = cmdLen >>> 3;
+      if (count == 0) {
+        continue;
+      }
 
       if (cmd == Command.MoveTo) {
         while (count-- > 0 && reader.pos < end) {
@@ -317,6 +320,8 @@ export class Feature<P = Record<string, PropValues>> {
             coords[ci++] = y0;
           }
         }
+      } else {
+        throw new Error(`unknown command ${cmd}`);
       }
     }
 
@@ -476,6 +481,9 @@ export class Feature<P = Record<string, PropValues>> {
       const cmdLen = reader.uint32();
       const cmd = cmdLen & 0x7;
       let count = cmdLen >>> 3;
+      if (count == 0) {
+        continue;
+      }
 
       if (cmd == Command.MoveTo || cmd == Command.LineTo) {
         while (count-- > 0 && reader.pos < end) {
@@ -486,6 +494,8 @@ export class Feature<P = Record<string, PropValues>> {
           yMax = Math.max(y, yMax);
           yMin = Math.min(y, yMin);
         }
+      } else if (cmd != Command.ClosePath) {
+        throw new Error(`unknown command ${cmd}`);
       }
     }
 
