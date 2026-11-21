@@ -438,6 +438,22 @@ describe('Feature and FeatureType', () => {
     const building = tile.layers.building.feature(0).loadGeometry();
     expect(building[0][0]).not.toBe(building[0][4]);
     expect(building[0][0]).toEqual(building[0][4]);
+
+    // ClosePath with large count is bounded to single closing vertex
+    const moveTo = (1 << 3) | 1;
+    const lineTo = (1 << 3) | 2;
+    const largeClosePath = (9999 << 3) | 7; // count=9999, cmd=ClosePath(7)
+    const polyFeatBytes = [
+      ...varintField(1, 1),
+      ...varintField(3, FeatureType.POLYGON),
+      ...lenField(4, [moveTo, 2, 4, lineTo, 6, 8, largeClosePath]),
+    ];
+    const polyTile = new VectorTile(
+      new Uint8Array(lenField(3, [...strField(1, 'layer'), ...lenField(2, polyFeatBytes)])),
+    );
+    const ring = polyTile.layers.layer.feature(0).loadGeometry()[0];
+    expect(ring.length).toBe(3); // start + lineTo + 1 closePath vertex
+    expect(ring[2]).toEqual(ring[0]);
   });
 
   it('returns Infinity sentinels from bbox() on explicit empty geometry stream', () => {

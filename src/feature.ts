@@ -169,12 +169,8 @@ export class Feature<P = Record<string, PropValues>> {
         }
       } else if (cmd == Command.ClosePath) {
         if (ringStart >= 0) {
-          const x0 = coords[ringStart];
-          const y0 = coords[ringStart + 1];
-          while (count-- > 0) {
-            coords[ci++] = x0;
-            coords[ci++] = y0;
-          }
+          coords[ci++] = coords[ringStart];
+          coords[ci++] = coords[ringStart + 1];
         }
       } else {
         throw new Error(`unknown command ${cmd}`);

@@ -38,6 +38,20 @@ describe('Layer', () => {
     expect(() => landuse.feature(-1)).toThrow('out of bounds');
     expect(() => landuse.feature(landuse.length)).toThrow('out of bounds');
     expect(() => landuse.feature(99999)).toThrow('out of bounds');
+    expect(() => landuse.feature(NaN)).toThrow('out of bounds');
+    expect(() => landuse.feature(1.5)).toThrow('out of bounds');
+  });
+
+  it('rejects features whose declared length extends past the layer boundary', () => {
+    // Declares feature length = 100 bytes, but layer only contains 2 bytes
+    const malformedLayer = [
+      ...strField(1, 'bad_layer'),
+      (2 << 3) | 2, // tag 2 (Features), wire type 2 (length-delimited)
+      100, // declared length 100
+      0,
+      0, // only 2 bytes payload
+    ];
+    expect(() => new VectorTile(new Uint8Array(lenField(3, malformedLayer)))).toThrow('feature extends past layer end');
   });
 
   it('implements Iterable for direct for..of iteration and Array.from', () => {
