@@ -1,47 +1,54 @@
 # vector-tile
 
-This library reads [Mapbox Vector Tiles](https://github.com/mapbox/vector-tile-spec) and allows access to the layers and features.
+This library reads [Mapbox Vector Tiles](https://github.com/mapbox/vector-tile-spec) and allows access to layers and features.
 
-It is based on [`@mapbox/vector-tile`](https://www.npmjs.com/package/@mapbox/vector-tile) with the following differences:
-- this library does not depend on [`@mapbox/point-geometry`](https://www.npmjs.com/package/@mapbox/point-geometry),
-- this library uses [`protobuf-ts`](https://github.com/timostamm/protobuf-ts) to decode protos,
-- this library is written in [TypeScript](https://www.typescriptlang.org/),
-- this library provides `Feature.asPoint()`, `Feature.asLine()`, `Feature.asPolygon()` to make it easier to work with geometries.
+It is based on [`@mapbox/vector-tile`](https://www.npmjs.com/package/@mapbox/vector-tile) with the following improvements:
+
+- **Zero-Point & Flat Geometry**: Provides `loadFlatGeometry()` and zero-`Point` `toGeoJSON()` to drastically reduce object allocations and GC pressure.
+- **Modern TypeScript & Generics**: Strongly typed `Feature<Props>`, `Layer<Props>`, and `toGeoJSON<Props>()` integrating with `@types/geojson`.
+- **Runtime `FeatureType`**: Exposes `FeatureType` as both a runtime object (`FeatureType.POLYGON === 3`) and TypeScript type.
+- **Convenience Geometry Accessors**: Built-in `asPoints()`, `asLines()`, and `asPolygons()` with support for inline coordinate transform callbacks `(x, y) => T`.
+- **Iterable Layers**: `Layer` implements `Iterable<Feature>` for natural `for (const feature of layer)` loops.
+- **Uses `@protobuf-ts/runtime`**: High-performance protobuf decoding.
+- **Pure ESM**: Built with Vite and tested with Vitest.
 
 ## Install
 
-```
-npm i --save mapbox-vector-tile
+```sh
+pnpm add mapbox-vector-tile
+# or npm i mapbox-vector-tile
 ```
 
 ## Example
 
-```js
-import { VectorTile } from 'mapbox-vector-tile';
+```ts
+import { VectorTile, FeatureType } from 'mapbox-vector-tile';
 
-// data is either a Buffer or a Uint8Array containing binary data.
+// data is a Uint8Array containing binary MVT protobuf data
 const tile = new VectorTile(data);
 
-// Contains a map of all layers
-tile.layers;
+// Safely get a strongly-typed layer
+const landuse = tile.getLayer<{ class: string }>('landuse');
 
-const landuse = tile.layers.landuse;
+if (landuse) {
+  // Iterate features directly
+  for (const feature of landuse) {
+    if (feature.type === FeatureType.POLYGON) {
+      // Get polygons classified with outer rings and inner holes
+      const polygons = feature.asPolygons();
 
-// Amount of features in this layer
-landuse.length;
-
-// Returns the first feature
-landuse.feature(0);
+      // Or convert directly to GeoJSON with typed properties
+      const geojson = feature.toGeoJSON(tileX, tileY, zoom);
+    }
+  }
+}
 ```
 
 ## Notes
 
-- 64-bit numbers could be returned as number (the default), string or bigint.
-  You can specify the format using the second parameter of `VectorTile`.
-- The features id are always returned as a numerical string.
+- 64-bit numbers can be returned as `number` (the default), `string`, or `bigint`. Specify via the second parameter of `VectorTile`.
+- Feature IDs default to numerical strings.
 
-## Changes 
+## Changelog
 
-0.3.0 - Oct 22, 2020
-
-- Switch to [protobuf-ts](https://github.com/timostamm/protobuf-ts).
+See [CHANGELOG.md](./CHANGELOG.md) for full revision history.
