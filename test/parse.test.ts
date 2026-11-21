@@ -378,6 +378,133 @@ describe('iteration and accessors', () => {
   });
 });
 
+describe('MVT v2 spec hardening and longType', () => {
+  function pushVarint(out: number[], v: number): void {
+    let n = v >>> 0;
+    while (n >= 0x80) {
+      out.push((n & 0x7f) | 0x80);
+      n >>>= 7;
+    }
+    out.push(n);
+  }
+
+  function lenField(fieldId: number, payload: number[]): number[] {
+    const out: number[] = [];
+    pushVarint(out, (fieldId << 3) | 2);
+    pushVarint(out, payload.length);
+    for (let i = 0; i < payload.length; i++) out.push(payload[i]);
+    return out;
+  }
+
+  function strField(fieldId: number, s: string): number[] {
+    return lenField(fieldId, Array.from(Buffer.from(s, 'utf8')));
+  }
+
+  function varintField(fieldId: number, v: number): number[] {
+    const out: number[] = [];
+    pushVarint(out, (fieldId << 3) | 0);
+    pushVarint(out, v);
+    return out;
+  }
+
+  it('defaults version to 1 and extent to 4096 when omitted', () => {
+    const featureBytes = [
+      ...varintField(3, FeatureType.POINT),
+      ...lenField(4, [9, 2, 4]), // MoveTo(1), dx=1, dy=2
+    ];
+    const layerBytes = [...strField(1, 'pts'), ...lenField(2, featureBytes)];
+    const tileBytes = new Uint8Array(lenField(3, layerBytes));
+
+    const tile = new VectorTile(tileBytes);
+    const layer = tile.layers.pts;
+    expect(layer.version).toBe(1);
+    expect(layer.extent).toBe(4096);
+    expect(layer.feature(0).loadGeometry()).toEqual([[{ x: 1, y: 2 }]]);
+    expect(layer.feature(0).toGeoJSON(0, 0, 0).geometry.type).toBe('Point');
+  });
+
+  it('skips unknown/extension fields in Tile, Layer, Value, and Feature', () => {
+    const valBytes = [
+      ...strField(1, 'ok'),
+      ...varintField(99, 12345), // unknown extension on Value
+    ];
+    const featureBytes = [
+      ...varintField(99, 777), // unknown field on Feature
+      ...varintField(1, 42), // id
+      ...lenField(2, [0, 0]), // tags
+      ...varintField(3, FeatureType.POINT),
+    ]; // geometry omitted intentionally
+    const layerBytes = [
+      ...varintField(99, 1), // unknown field on Layer
+      ...strField(1, 'ext'),
+      ...strField(3, 'k'),
+      ...lenField(4, valBytes),
+      ...lenField(2, featureBytes),
+    ];
+    const tileBytes = new Uint8Array([
+      ...varintField(99, 5), // unknown field on Tile
+      ...lenField(3, layerBytes),
+    ]);
+
+    const tile = new VectorTile(tileBytes);
+    const feat = tile.layers.ext.feature(0);
+    expect(feat.id).toBe('42');
+    expect(feat.properties.k).toBe('ok');
+    expect(feat.loadGeometry()).toEqual([]);
+    expect(feat.bbox()).toEqual([
+      Number.MAX_SAFE_INTEGER,
+      Number.MAX_SAFE_INTEGER,
+      Number.MIN_SAFE_INTEGER,
+      Number.MIN_SAFE_INTEGER,
+    ]);
+  });
+
+  it('returns null from asPoints/asLines/asPolygons on mismatched types', () => {
+    const data = fs.readFileSync(__dirname + '/fixtures/14-8801-5371.vector.pbf');
+    const tile = new VectorTile(data);
+    const pointFeat = tile.layers.poi_label.feature(11);
+    const lineFeat = tile.layers.road.feature(656);
+    const polyFeat = tile.layers.building.feature(0);
+
+    expect(pointFeat.asLines()).toBeNull();
+    expect(pointFeat.asPolygons()).toBeNull();
+    expect(lineFeat.asPoints()).toBeNull();
+    expect(lineFeat.asPolygons()).toBeNull();
+    expect(polyFeat.asPoints()).toBeNull();
+    expect(polyFeat.asLines()).toBeNull();
+  });
+
+  it('supports longType number, string, and bigint and unsigned feature ids', () => {
+    // 2^53 + 1 = 9007199254740993 in unsigned LEB128
+    const bigValVarint = [0x81, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x10];
+    // 2^64 - 1 = 18446744073709551615 in unsigned LEB128
+    const maxUint64Varint = [0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x01];
+
+    const valBytes = [(5 << 3) | 0, ...bigValVarint]; // uint_value = field 5
+    const featBytes = [(1 << 3) | 0, ...maxUint64Varint, ...lenField(2, [0, 0]), ...varintField(3, FeatureType.POINT)];
+
+    const layerBytes = [...strField(1, 'longs'), ...strField(3, 'n'), ...lenField(4, valBytes), ...lenField(2, featBytes)];
+    const tileBytes = new Uint8Array(lenField(3, layerBytes));
+
+    const asString = new VectorTile(tileBytes, 'string').layers.longs.feature(0);
+    expect(asString.id).toBe('18446744073709551615');
+    expect(asString.properties.n).toBe('9007199254740993');
+
+    const asBigInt = new VectorTile(tileBytes, 'bigint').layers.longs.feature(0);
+    expect(typeof asBigInt.properties.n).toBe('bigint');
+    expect(String(asBigInt.properties.n)).toBe('9007199254740993');
+
+    expect(() => new VectorTile(tileBytes, 'number')).toThrow();
+
+    const safeValBytes = [...varintField(5, 42)];
+    const safeTile = new Uint8Array(
+      lenField(3, [...strField(1, 'longs'), ...strField(3, 'n'), ...lenField(4, safeValBytes), ...lenField(2, featBytes)]),
+    );
+    const asNumber = new VectorTile(safeTile, 'number').layers.longs.feature(0);
+    expect(asNumber.properties.n).toBe(42);
+  });
+});
+
 // Custom matchers
 
 function approximateDeepEqual(a: any, b: any, epsilon: number): [boolean, string] {
