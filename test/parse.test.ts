@@ -764,6 +764,13 @@ describe('upstream bug fixes', () => {
     expect(feature.asLines()).toBeNull();
     expect(feature.asPolygons()).toBeNull();
   });
+
+  it('returns Infinity sentinels from bbox() on an explicit empty geometry stream', () => {
+    const featBytes = [...varintField(3, FeatureType.POINT), ...lenField(4, [])];
+    const layerBytes = [...strField(1, 'layer'), ...lenField(2, featBytes)];
+    const feature = new VectorTile(new Uint8Array(lenField(3, layerBytes))).layers.layer.feature(0);
+    expect(feature.bbox()).toEqual([Infinity, Infinity, -Infinity, -Infinity]);
+  });
 });
 
 // Custom matchers

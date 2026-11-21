@@ -457,10 +457,10 @@ export class Feature<P = Record<string, PropValues>> {
       throw new Error('feature has no geometry');
     }
 
-    let xMin = Number.MAX_SAFE_INTEGER;
-    let xMax = Number.MIN_SAFE_INTEGER;
-    let yMin = Number.MAX_SAFE_INTEGER;
-    let yMax = Number.MIN_SAFE_INTEGER;
+    let xMin = Infinity;
+    let xMax = -Infinity;
+    let yMin = Infinity;
+    let yMax = -Infinity;
 
     const reader = this.reader;
     reader.pos = this.geometryOffset;
