@@ -45,6 +45,8 @@ describe('Feature and FeatureType', () => {
       ],
     ]);
     expect(roadFeat.bbox()).toEqual([1506, 306, 1988, 347]);
+    // Verifies bbox caching returns the exact same reference
+    expect(roadFeat.bbox()).toBe(roadFeat.bbox());
   });
 
   it('supports strongly typed properties and generics with toGeoJSON', () => {

@@ -24,6 +24,7 @@ export const FeatureType = {
  */
 export type FeatureType = (typeof FeatureType)[keyof typeof FeatureType];
 
+const DEG_TO_RAD = Math.PI / 180;
 const RAD_TO_DEG = 360 / Math.PI;
 const MAX_SCRATCH_COORDS = 8192;
 const MAX_SCRATCH_ENDS = 1024;
@@ -59,9 +60,18 @@ function mapRing<T>(
 }
 
 function signedAreaFlat(coords: number[], start: number, end: number): number {
+  if (end - start < 6) {
+    return 0;
+  }
   let sum = 0;
-  for (let i = start, j = end - 2; i < end; j = i, i += 2) {
-    sum += (coords[j] - coords[i]) * (coords[i + 1] + coords[j + 1]);
+  let p2x = coords[end - 2];
+  let p2y = coords[end - 1];
+  for (let i = start; i < end; i += 2) {
+    const p1x = coords[i];
+    const p1y = coords[i + 1];
+    sum += (p2x - p1x) * (p1y + p2y);
+    p2x = p1x;
+    p2y = p1y;
   }
   return sum;
 }
@@ -252,8 +262,8 @@ export class Feature<P = Record<string, PropValues>> {
               polygons.push(polygon);
             }
             polygon = [mapRing(coords, start, end, transform)];
-          } else if (polygon) {
-            polygon.push(mapRing(coords, start, end, transform));
+          } else {
+            polygon?.push(mapRing(coords, start, end, transform));
           }
         }
         start = end;
@@ -313,13 +323,20 @@ export class Feature<P = Record<string, PropValues>> {
     return this.buildRings(transform);
   }
 
+  private _bbox?: [number, number, number, number];
+
   /**
    * Computes and returns the 2D bounding box of the geometry in tile coordinates as `[xMin, yMin, xMax, yMax]`.
+   *
+   * The result is cached after the first computation.
    *
    * @returns The bounding box `[xMin, yMin, xMax, yMax]`.
    * @throws Error if the feature has no geometry.
    */
   bbox(): [number, number, number, number] {
+    if (this._bbox) {
+      return this._bbox;
+    }
     if (!this.geometryOffset) {
       throw new Error('feature has no geometry');
     }
@@ -348,17 +365,17 @@ export class Feature<P = Record<string, PropValues>> {
         while (count-- > 0 && reader.pos < end) {
           x += reader.sint32();
           y += reader.sint32();
-          xMax = Math.max(x, xMax);
-          xMin = Math.min(x, xMin);
-          yMax = Math.max(y, yMax);
-          yMin = Math.min(y, yMin);
+          if (x > xMax) xMax = x;
+          if (x < xMin) xMin = x;
+          if (y > yMax) yMax = y;
+          if (y < yMin) yMin = y;
         }
       } else if (cmd != Command.ClosePath) {
         throw new Error(`unknown command ${cmd}`);
       }
     }
 
-    return [xMin, yMin, xMax, yMax];
+    return (this._bbox = [xMin, yMin, xMax, yMax]);
   }
 
   /**
@@ -376,7 +393,7 @@ export class Feature<P = Record<string, PropValues>> {
     y: number,
     zoom: number,
   ): GeoJSONFeature<Geom, Props> {
-    const size = this.extent * Math.pow(2, zoom);
+    const size = this.extent * (zoom < 31 ? 1 << zoom : 2 ** zoom);
     const x0 = this.extent * x;
     const y0 = this.extent * y;
     const degScale = 360 / size;
@@ -385,7 +402,7 @@ export class Feature<P = Record<string, PropValues>> {
 
     const project = (px: number, py: number): Position => {
       const y2 = 180 - (py + y0) * degScale;
-      return [(px + x0) * degScale - 180, RAD_TO_DEG * Math.atan(Math.exp((y2 * Math.PI) / 180)) - 90];
+      return [(px + x0) * degScale - 180, RAD_TO_DEG * Math.atan(Math.exp(y2 * DEG_TO_RAD)) - 90];
     };
 
     switch (this.type) {
