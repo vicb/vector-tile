@@ -39,17 +39,19 @@ export class VectorTile {
   // List of non-empty layers.
   readonly layers: { [key: string]: Layer } = {};
 
-  private reader: BinaryReader;
-
   // The constructor takes a byte buffer.
-  constructor(bytes: Uint8Array | Buffer, private longType: LongType = "number") {
-    this.reader = new BinaryReader(bytes);
-    const end = this.reader.len;
-    while (this.reader.pos < end) {
-      this.reader.uint32();
-      const layer = new Layer(this.reader, this.reader.uint32() + this.reader.pos, this.longType);
-      if (layer.length) {
-        this.layers[layer.name] = layer;
+  constructor(bytes: Uint8Array, longType: LongType = "number") {
+    const reader = new BinaryReader(bytes);
+    const end = reader.len;
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      if (tag >>> 3 == 3) {
+        const layer = new Layer(reader, reader.uint32() + reader.pos, longType);
+        if (layer.length) {
+          this.layers[layer.name] = layer;
+        }
+      } else {
+        reader.skip(tag & 7);
       }
     }
   }
@@ -64,8 +66,8 @@ export class VectorTile {
 // A layer of a vector tile.
 export class Layer<P = Record<string, PropValues>> implements Iterable<Feature<P>> {
   readonly name: string = '';
-  readonly version: number = 0;
-  readonly extent: number = 0;
+  readonly version: number = 1;
+  readonly extent: number = 4096;
   readonly length: number;
 
   private featureOffsets: number[] = [];
@@ -73,9 +75,9 @@ export class Layer<P = Record<string, PropValues>> implements Iterable<Feature<P
   private values: Array<PropValues> = [];
 
   constructor(private reader: BinaryReader, end: number, private longType: LongType) {
-
     while (reader.pos < end) {
-      const [fieldId, wireType] = reader.tag();
+      const tag = reader.uint32();
+      const fieldId = tag >>> 3;
       if (fieldId == 15) {
         this.version = reader.uint32();
       } else if (fieldId == 1) {
@@ -84,11 +86,13 @@ export class Layer<P = Record<string, PropValues>> implements Iterable<Feature<P
         this.extent = reader.uint32();
       } else if (fieldId == 2) {
         this.featureOffsets.push(reader.pos);
-        reader.skip(wireType);
+        reader.skip(tag & 7);
       } else if (fieldId == 3) {
         this.keys.push(reader.string());
       } else if (fieldId == 4) {
         this.values.push(this.decodeValue());
+      } else {
+        reader.skip(tag & 7);
       }
     }
 
@@ -97,7 +101,7 @@ export class Layer<P = Record<string, PropValues>> implements Iterable<Feature<P
 
   // Returns the features at the given `index`.
   feature<FP = P>(index: number): Feature<FP> {
-    if (index < 0 || index >= this.featureOffsets.length) {
+    if (index < 0 || index >= this.length) {
       throw new Error('out of bounds');
     }
     this.reader.pos = this.featureOffsets[index];
@@ -118,23 +122,31 @@ export class Layer<P = Record<string, PropValues>> implements Iterable<Feature<P
     const end = reader.uint32() + reader.pos;
     let value: PropValues = null;
     while (reader.pos < end) {
-      const [fieldId] = reader.tag();
-      if (fieldId == 1) {
-        value = reader.string();
-      } else if (fieldId == 2) {
-        value = reader.float();
-      } else if (fieldId == 3) {
-        value = reader.double();
-      } else if (fieldId == 4) {
-        value = this.convertLong(reader.int64());
-      } else if (fieldId == 5) {
-        value = this.convertLong(reader.uint64());
-      } else if (fieldId == 6) {
-        value = this.convertLong(reader.sint64());
-      } else if (fieldId == 7) {
-        value = reader.bool();
-      } else {
-        value = null;
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1:
+          value = reader.string();
+          break;
+        case 2:
+          value = reader.float();
+          break;
+        case 3:
+          value = reader.double();
+          break;
+        case 4:
+          value = this.convertLong(reader.int64());
+          break;
+        case 5:
+          value = this.convertLong(reader.uint64());
+          break;
+        case 6:
+          value = this.convertLong(reader.sint64());
+          break;
+        case 7:
+          value = reader.bool();
+          break;
+        default:
+          reader.skip(tag & 7);
       }
     }
     return value;
@@ -183,27 +195,32 @@ export class Feature<P = Record<string, PropValues>> {
     public readonly extent: number,
   ) {
     while (reader.pos < end) {
-      const [fieldId, wireType] = reader.tag();
+      const tag = reader.uint32();
+      const fieldId = tag >>> 3;
       if (fieldId == 1) {
-        this.id = reader.int64().toString();
+        this.id = reader.uint64().toString();
       } else if (fieldId == 2) {
-        const end = reader.uint32() + reader.pos;
-        while (reader.pos < end) {
-          const key = keys[reader.uint32()];
-          const value = values[reader.uint32()];
-          (this.properties as unknown as Record<string, PropValues>)[key] = value;
+        const tagsEnd = reader.uint32() + reader.pos;
+        const props = this.properties as unknown as Record<string, PropValues>;
+        while (reader.pos < tagsEnd) {
+          props[keys[reader.uint32()]] = values[reader.uint32()];
         }
       } else if (fieldId == 3) {
         this.type = reader.uint32() as FeatureType;
       } else if (fieldId == 4) {
         this.geometryOffset = reader.pos;
-        reader.skip(wireType);
+        reader.skip(tag & 7);
+      } else {
+        reader.skip(tag & 7);
       }
     }
   }
 
   // Lazily loads the geometry.
   loadGeometry(): Point[][] {
+    if (!this.geometryOffset) {
+      return [];
+    }
     this.reader.pos = this.geometryOffset;
 
     const end = this.reader.uint32() + this.reader.pos;
@@ -251,6 +268,15 @@ export class Feature<P = Record<string, PropValues>> {
 
   // Returns the bounding box of a geometry as `[xMin, yMin, xMax, yMax]`.
   bbox(): [number, number, number, number] {
+    let xMin = Number.MAX_SAFE_INTEGER;
+    let xMax = Number.MIN_SAFE_INTEGER;
+    let yMin = Number.MAX_SAFE_INTEGER;
+    let yMax = Number.MIN_SAFE_INTEGER;
+
+    if (!this.geometryOffset) {
+      return [xMin, yMin, xMax, yMax];
+    }
+
     this.reader.pos = this.geometryOffset;
 
     const end = this.reader.uint32() + this.reader.pos;
@@ -258,10 +284,6 @@ export class Feature<P = Record<string, PropValues>> {
     let count = 0;
     let x = 0;
     let y = 0;
-    let xMin = Number.MAX_SAFE_INTEGER;
-    let xMax = Number.MIN_SAFE_INTEGER;
-    let yMin = Number.MAX_SAFE_INTEGER;
-    let yMax = Number.MIN_SAFE_INTEGER;
 
     while (this.reader.pos < end) {
       if (count <= 0) {
@@ -351,8 +373,7 @@ export class Feature<P = Record<string, PropValues>> {
 
   // Returns a list of points or null if the type is not POINT.
   asPoints(): Point[] | null {
-    const points = this.loadGeometry().map((points: Point[]) => points[0]);
-    return this.type == FeatureType.POINT ? points : null;
+    return this.type == FeatureType.POINT ? this.loadGeometry().map((points: Point[]) => points[0]) : null;
   }
 
   // Returns a list of lines or null if the type is not LINESTRING.
