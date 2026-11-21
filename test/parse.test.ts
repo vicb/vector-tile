@@ -2,7 +2,7 @@
 import fs from 'fs';
 import type { Feature as GeoJSONFeatureType, MultiPolygon, Polygon } from 'geojson';
 
-import { Coord2D, FeatureType, GeoJSONFeature, VectorTile } from '../src/index';
+import { Coord2D, FeatureType, GeoJSONFeature, Layer, VectorTile } from '../src/index';
 
 describe('FeatureType', () => {
   it('is available as a runtime object', () => {
@@ -602,6 +602,38 @@ describe('flat geometry and transform callbacks', () => {
       new Uint8Array(lenField(3, [...strField(1, 'u'), ...lenField(2, varintField(3, FeatureType.UNKNOWN))])),
     );
     expect(() => unknownTile.layers.u.feature(0).toGeoJSON(0, 0, 0)).toThrow('Unknown feature type');
+  });
+});
+
+describe('upstream bug fixes', () => {
+  it('does not mutate prototypes via a "__proto__" layer name or property key', () => {
+    const featBytes = [
+      ...varintField(1, 1),
+      ...lenField(2, [0, 0]),
+      ...varintField(3, FeatureType.POINT),
+      ...lenField(4, [9, 0, 0]),
+    ];
+    const valBytes = strField(1, 'evil');
+    const layerBytes = [
+      ...varintField(15, 2),
+      ...strField(1, '__proto__'),
+      ...lenField(2, featBytes),
+      ...strField(3, '__proto__'),
+      ...lenField(4, valBytes),
+      ...varintField(5, 4096),
+    ];
+    const tile = new VectorTile(new Uint8Array(lenField(3, layerBytes)));
+
+    expect(Object.getPrototypeOf(tile.layers)).toBeNull();
+    const layer = tile.layers['__proto__'];
+    expect(layer).toBeInstanceOf(Layer);
+    expect(tile.getLayer('__proto__')).toBe(layer);
+    expect(layer.name).toBe('__proto__');
+
+    const feature = layer.feature(0);
+    expect(Object.getPrototypeOf(feature.properties)).toBeNull();
+    expect(feature.properties['__proto__']).toBe('evil');
+    expect(({} as Record<string, unknown>).evil).toBeUndefined();
   });
 });
 
