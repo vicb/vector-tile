@@ -15,27 +15,58 @@ import type {
   Position,
 } from 'geojson';
 
-export type LongType = "number" | "string" | "bigint";
+/**
+ * Representation format for 64-bit integer values decoded from protobuf messages.
+ * - `"number"`: Converts to JavaScript `number` (safe up to 2^53 - 1).
+ * - `"string"`: Converts to decimal string representation without precision loss.
+ * - `"bigint"`: Converts to native JavaScript `bigint`.
+ */
+export type LongType = 'number' | 'string' | 'bigint';
+
+/**
+ * Permitted primitive types for decoded vector tile feature property values.
+ */
 export type PropValues = string | number | boolean | bigint;
+
+/**
+ * A 2-element coordinate pair `[x, y]` representing a 2D point or vertex.
+ */
 export type Coord2D = [number, number];
 
+/**
+ * Flat representation of decoded feature geometries for high-performance processing and minimal GC allocation.
+ */
 export interface FlatGeometry {
+  /** Flat array of alternating x and y coordinates: `[x0, y0, x1, y1, ...]`. */
   readonly coords: number[];
+  /** Array of end indices in `coords` marking the end of each ring or component. */
   readonly ends: number[];
 }
 
+/**
+ * Supported GeoJSON geometry types produced by `Feature.toGeoJSON()`.
+ */
 export type GeoJSONFeatureGeometry =
-  | GeoJSONPoint
-  | GeoJSONMultiPoint
-  | GeoJSONLineString
-  | GeoJSONMultiLineString
-  | GeoJSONPolygon
-  | GeoJSONMultiPolygon;
+  GeoJSONPoint | GeoJSONMultiPoint | GeoJSONLineString | GeoJSONMultiLineString | GeoJSONPolygon | GeoJSONMultiPolygon;
 
+/**
+ * Re-export of standard GeoJSON `Feature` type.
+ */
 export type { GeoJSONFeature };
 
+/**
+ * A 2D point with `x` and `y` coordinates.
+ */
 export class Point {
-  constructor(public readonly x: number, public readonly y: number) { }
+  /**
+   * Creates a new Point.
+   * @param x - The x-coordinate.
+   * @param y - The y-coordinate.
+   */
+  constructor(
+    public readonly x: number,
+    public readonly y: number,
+  ) {}
 }
 
 let textDecoder: TextDecoder | undefined;
@@ -80,15 +111,22 @@ const FeatureTag = {
   Geometry: (4 << 3) | WireType.LengthDelimited, // 34
 } as const;
 
-// A vector tile.
-//
-// Contains all the non-empty layers indexed by name.
+/**
+ * Represents a decoded Mapbox Vector Tile (MVT).
+ *
+ * Contains all non-empty layers parsed from the protobuf payload.
+ */
 export class VectorTile {
-  // List of non-empty layers.
+  /** Map of non-empty layers indexed by layer name. */
   readonly layers: { [key: string]: Layer } = Object.create(null);
 
-  // The constructor takes a byte buffer.
-  constructor(bytes: Uint8Array, longType: LongType = "number") {
+  /**
+   * Decodes a vector tile from a binary protobuf buffer.
+   *
+   * @param bytes - The raw vector tile protobuf byte buffer.
+   * @param longType - How to decode 64-bit integers (`"number"`, `"string"`, or `"bigint"`). Defaults to `"number"`.
+   */
+  constructor(bytes: Uint8Array, longType: LongType = 'number') {
     const reader = new BinaryReader(
       bytes,
       textDecoder || (textDecoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true })),
@@ -107,23 +145,44 @@ export class VectorTile {
     }
   }
 
+  /**
+   * Retrieves a layer by name, safely typed with the specified feature property interface.
+   *
+   * @typeParam P - Shape of the feature properties object for this layer.
+   * @param name - The name of the layer.
+   * @returns The matching Layer instance, or `undefined` if the layer does not exist.
+   */
   getLayer<P = Record<string, PropValues>>(name: string): Layer<P> | undefined {
     return this.layers[name] as unknown as Layer<P> | undefined;
   }
 }
 
-// A layer of a vector tile.
+/**
+ * Represents a single layer within a Mapbox Vector Tile.
+ *
+ * Implements `Iterable<Feature<P>>`, allowing direct iteration with `for..of` or `Array.from()`.
+ *
+ * @typeParam P - Shape of the feature properties object within this layer.
+ */
 export class Layer<P = Record<string, PropValues>> implements Iterable<Feature<P>> {
+  /** Name of the layer. */
   readonly name: string = '';
+  /** Vector tile specification version of the layer (typically 2). */
   readonly version: number = 1;
+  /** Tile coordinate extent (grid resolution, typically 4096). */
   readonly extent: number = 4096;
+  /** Number of features in the layer. */
   readonly length: number;
 
   private featureOffsets: number[] = [];
   private keys: string[] = [];
   private values: Array<PropValues> = [];
 
-  constructor(private reader: BinaryReader, end: number, private longType: LongType) {
+  constructor(
+    private reader: BinaryReader,
+    end: number,
+    private longType: LongType,
+  ) {
     while (reader.pos < end) {
       const tag = reader.uint32();
       if (tag == LayerTag.Features) {
@@ -147,7 +206,14 @@ export class Layer<P = Record<string, PropValues>> implements Iterable<Feature<P
     this.length = this.featureOffsets.length;
   }
 
-  // Returns the features at the given `index`.
+  /**
+   * Returns the feature at the specified index.
+   *
+   * @typeParam FP - Override for the feature property type.
+   * @param index - 0-based index of the feature in this layer.
+   * @throws Error if the index is out of bounds (`< 0` or `>= length`).
+   * @returns The decoded Feature instance.
+   */
   feature<FP = P>(index: number): Feature<FP> {
     if (index < 0 || index >= this.length) {
       throw new Error('out of bounds');
@@ -157,6 +223,9 @@ export class Layer<P = Record<string, PropValues>> implements Iterable<Feature<P
     return new Feature<FP>(this.reader, end, this.keys, this.values, this.extent);
   }
 
+  /**
+   * Returns an iterator over all features in the layer.
+   */
   [Symbol.iterator](): Iterator<Feature<P>> {
     let index = 0;
     return {
@@ -205,23 +274,33 @@ export class Layer<P = Record<string, PropValues>> implements Iterable<Feature<P
 
   private convertLong(long: PbULong | PbLong): string | number | bigint {
     switch (this.longType) {
-      case "number":
+      case 'number':
         return long.toNumber();
-      case "string":
+      case 'string':
         return long.toString();
-      case "bigint":
+      case 'bigint':
         return long.toBigInt();
     }
   }
 }
 
+/**
+ * Mapbox Vector Tile geometry types as defined in the MVT specification.
+ */
 export const FeatureType = {
+  /** Unknown geometry type. */
   UNKNOWN: 0,
+  /** Point or MultiPoint geometry. */
   POINT: 1,
+  /** LineString or MultiLineString geometry. */
   LINESTRING: 2,
+  /** Polygon or MultiPolygon geometry. */
   POLYGON: 3,
 } as const;
 
+/**
+ * Union of possible MVT feature type values (`0 | 1 | 2 | 3`).
+ */
 export type FeatureType = (typeof FeatureType)[keyof typeof FeatureType];
 
 const enum Command {
@@ -272,10 +351,17 @@ function signedAreaFlat(coords: number[], start: number, end: number): number {
   return sum;
 }
 
-// A feature in a layer.
+/**
+ * Represents a single feature within a vector tile layer.
+ *
+ * @typeParam P - Shape of the feature properties object.
+ */
 export class Feature<P = Record<string, PropValues>> {
+  /** Optional identifier of the feature (decoded as a string). */
   readonly id?: string;
+  /** Geometry type of the feature (Point, LineString, or Polygon). */
   readonly type: FeatureType = FeatureType.UNKNOWN;
+  /** Decoded key-value properties dictionary. */
   readonly properties: P = Object.create(null);
 
   private geometryOffset = 0;
@@ -285,6 +371,7 @@ export class Feature<P = Record<string, PropValues>> {
     end: number,
     keys: string[],
     values: Array<PropValues>,
+    /** Coordinate resolution extent inherited from the layer (e.g. 4096). */
     public readonly extent: number,
   ) {
     while (reader.pos < end) {
@@ -467,7 +554,14 @@ export class Feature<P = Record<string, PropValues>> {
     }
   }
 
-  // Lazily loads the geometry as a flat coordinate buffer.
+  /**
+   * Lazily decodes the feature geometry as a flat coordinate buffer.
+   *
+   * Highly optimized for WebGL buffers and worker serialization with minimal GC allocations.
+   *
+   * @returns An object with flat `coords` (`[x0, y0, x1, y1, ...]`) and `ends` indices.
+   * @throws Error if the feature has no geometry.
+   */
   loadFlatGeometry(): FlatGeometry {
     const coords = scratchCoords || [];
     const ends = scratchEnds || [];
@@ -484,14 +578,32 @@ export class Feature<P = Record<string, PropValues>> {
     }
   }
 
-  // Lazily loads the geometry.
+  /**
+   * Lazily decodes the feature geometry into rings of Points.
+   *
+   * @returns Array of rings where each ring is an array of `Point` instances.
+   * @throws Error if the feature has no geometry.
+   */
   loadGeometry(): Point[][];
+  /**
+   * Lazily decodes the feature geometry, applying an in-place coordinate transformation callback.
+   *
+   * @typeParam T - Target coordinate representation type.
+   * @param transform - Callback mapping `(x, y)` tile coordinates to transformed vertex values.
+   * @returns Array of rings where each ring is an array of transformed vertices `T`.
+   * @throws Error if the feature has no geometry.
+   */
   loadGeometry<T>(transform: (x: number, y: number) => T): T[][];
   loadGeometry<T>(transform?: (x: number, y: number) => T): (Point | T)[][] {
     return this.buildRings(transform);
   }
 
-  // Returns the bounding box of a geometry as `[xMin, yMin, xMax, yMax]`.
+  /**
+   * Computes and returns the 2D bounding box of the geometry in tile coordinates as `[xMin, yMin, xMax, yMax]`.
+   *
+   * @returns The bounding box `[xMin, yMin, xMax, yMax]`.
+   * @throws Error if the feature has no geometry.
+   */
   bbox(): [number, number, number, number] {
     if (!this.geometryOffset) {
       throw new Error('feature has no geometry');
@@ -511,7 +623,7 @@ export class Feature<P = Record<string, PropValues>> {
 
     while (reader.pos < end) {
       const cmdLen = reader.uint32();
-      const cmd = cmdLen & COMMAND_ID_MASK;
+      const cmd = cmdLen & 0x7;
       let count = cmdLen >>> 3;
       if (count == 0) {
         continue;
@@ -534,8 +646,16 @@ export class Feature<P = Record<string, PropValues>> {
     return [xMin, yMin, xMax, yMax];
   }
 
-  // Returns a GeoJSON representation of the feature. 
-  // x, y, and zoom refer to the tile coordinates.
+  /**
+   * Projects and converts the feature to a GeoJSON Feature object in WGS84 coordinates.
+   *
+   * @typeParam Props - Type of the GeoJSON feature properties. Defaults to `P`.
+   * @typeParam Geom - Type of the GeoJSON geometry. Defaults to `GeoJSONFeatureGeometry`.
+   * @param x - Tile column (X) in the Web Mercator tile pyramid.
+   * @param y - Tile row (Y) in the Web Mercator tile pyramid.
+   * @param zoom - Zoom level of the tile.
+   * @returns A GeoJSON `Feature` with projected WGS84 coordinates `[longitude, latitude]`.
+   */
   toGeoJSON<Props = P, Geom extends GeoJSONGeometry | null = GeoJSONFeatureGeometry>(
     x: number,
     y: number,
@@ -595,34 +715,73 @@ export class Feature<P = Record<string, PropValues>> {
     return result;
   }
 
-  // Returns a list of points or null if the type is not POINT.
+  /**
+   * Returns the geometry as points if `type === FeatureType.POINT`, or `null` otherwise.
+   *
+   * @returns Array of `Point` instances, or `null` if the feature is not a point.
+   */
   asPoints(): Point[] | null;
+  /**
+   * Returns the geometry as transformed points if `type === FeatureType.POINT`, or `null` otherwise.
+   *
+   * @typeParam T - Target coordinate representation type.
+   * @param transform - Callback mapping `(x, y)` tile coordinates to transformed vertex values.
+   * @returns Array of transformed coordinates `T`, or `null` if the feature is not a point.
+   */
   asPoints<T>(transform: (x: number, y: number) => T): T[] | null;
   asPoints<T>(transform?: (x: number, y: number) => T): (Point | T)[] | null {
     return this.type == FeatureType.POINT ? this.buildPoints(transform) : null;
   }
 
-  // Returns a list of lines or null if the type is not LINESTRING.
+  /**
+   * Returns the geometry as line strings if `type === FeatureType.LINESTRING`, or `null` otherwise.
+   *
+   * @returns Array of lines (each an array of `Point` instances), or `null` if the feature is not a linestring.
+   */
   asLines(): Point[][] | null;
+  /**
+   * Returns the geometry as transformed line strings if `type === FeatureType.LINESTRING`, or `null` otherwise.
+   *
+   * @typeParam T - Target coordinate representation type.
+   * @param transform - Callback mapping `(x, y)` tile coordinates to transformed vertex values.
+   * @returns Array of lines (each an array of transformed coordinates `T`), or `null` if the feature is not a linestring.
+   */
   asLines<T>(transform: (x: number, y: number) => T): T[][] | null;
   asLines<T>(transform?: (x: number, y: number) => T): (Point | T)[][] | null {
     return this.type == FeatureType.LINESTRING ? this.buildRings(transform) : null;
   }
 
-  // Returns a list of polygons or null if the type is not POLYGON.
-  //
-  // Each polygon could be composed of one or more rings:
-  // - The first ring is the exterior ring,
-  // - following rings are interior rings (=holes).
+  /**
+   * Returns the geometry as classified polygons if `type === FeatureType.POLYGON`, or `null` otherwise.
+   *
+   * Each polygon is an array of rings:
+   * - Index 0: Exterior boundary ring.
+   * - Index 1+: Interior hole rings.
+   *
+   * @returns Array of polygons, or `null` if the feature is not a polygon.
+   */
   asPolygons(): Point[][][] | null;
+  /**
+   * Returns the geometry as classified polygons with transformed vertices if `type === FeatureType.POLYGON`, or `null` otherwise.
+   *
+   * @typeParam T - Target coordinate representation type.
+   * @param transform - Callback mapping `(x, y)` tile coordinates to transformed vertex values.
+   * @returns Array of polygons, or `null` if the feature is not a polygon.
+   */
   asPolygons<T>(transform: (x: number, y: number) => T): T[][][] | null;
   asPolygons<T>(transform?: (x: number, y: number) => T): (Point | T)[][][] | null {
     return this.type == FeatureType.POLYGON ? this.buildPolygons(transform) : null;
   }
 }
 
-// Converts a list of rings to a list of polygons.
-// Exterior ring orientation is inferred from the first non-zero-area ring.
+/**
+ * Converts a flat list of polygon rings into structured polygon hierarchies (exterior rings with interior holes).
+ *
+ * Exterior ring winding direction is inferred from the first non-zero-area ring.
+ *
+ * @param rings - Array of coordinate rings.
+ * @returns Array of polygons, where each polygon is an array of rings (outer ring first, followed by holes).
+ */
 export function classifyRings(rings: Point[][]): Point[][][] {
   const len = rings.length;
 
