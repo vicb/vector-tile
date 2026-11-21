@@ -395,13 +395,17 @@ export class Feature<P = Record<string, PropValues>> {
 
       const polygons: (Point | T)[][][] = [];
       let polygon: (Point | T)[][] | null = null;
+      let ccw: boolean | undefined;
       let start = 0;
 
       for (let r = 0; r < numRings; r++) {
         const end = ends[r];
         const area = signedAreaFlat(coords, start, end);
         if (area != 0) {
-          if (area > 0) {
+          if (ccw === undefined) {
+            ccw = area < 0;
+          }
+          if (ccw === area < 0) {
             if (polygon) {
               polygons.push(polygon);
             }
@@ -576,7 +580,7 @@ export class Feature<P = Record<string, PropValues>> {
 }
 
 // Converts a list of rings to a list of polygons.
-// Exterior rings are detected when the area is positive.
+// Exterior ring orientation is inferred from the first non-zero-area ring.
 export function classifyRings(rings: Point[][]): Point[][][] {
   const len = rings.length;
 
@@ -586,6 +590,7 @@ export function classifyRings(rings: Point[][]): Point[][][] {
 
   const polygons: Point[][][] = [];
   let polygon: Point[][] | null = null;
+  let ccw: boolean | undefined;
 
   for (let i = 0; i < len; i++) {
     const area = signedArea(rings[i]);
@@ -593,13 +598,17 @@ export function classifyRings(rings: Point[][]): Point[][][] {
       continue;
     }
 
-    if (area > 0) {
+    if (ccw === undefined) {
+      ccw = area < 0;
+    }
+
+    if (ccw === area < 0) {
       if (polygon) {
         polygons.push(polygon);
       }
       polygon = [rings[i]];
-    } else {
-      polygon?.push(rings[i]);
+    } else if (polygon) {
+      polygon.push(rings[i]);
     }
   }
 
