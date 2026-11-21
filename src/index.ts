@@ -4,5 +4,9 @@
  * @packageDocumentation
  */
 
-export { VectorTile, Layer, Feature, FeatureType, Point, classifyRings } from './tile';
-export type { Coord2D, FlatGeometry, LongType, PropValues, GeoJSONFeature, GeoJSONFeatureGeometry } from './tile';
+export { VectorTile } from './tile';
+export { Layer } from './layer';
+export { Feature, FeatureType } from './feature';
+export { Point } from './point';
+export { classifyRings } from './classify';
+export type * from './types';

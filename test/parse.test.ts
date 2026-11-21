@@ -3,8 +3,7 @@ import path from 'node:path';
 import type { Feature as GeoJSONFeatureType, MultiPolygon, Polygon } from 'geojson';
 import { describe, expect, it } from 'vitest';
 
-import { Coord2D, FeatureType, GeoJSONFeature, Layer, Point, VectorTile } from '../src/index';
-import { classifyRings } from '../src/tile';
+import { Coord2D, FeatureType, GeoJSONFeature, Layer, Point, VectorTile, classifyRings } from '../src/index';
 
 const FIXTURES_DIR = path.resolve(import.meta.dirname, 'fixtures');
 
