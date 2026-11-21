@@ -40,6 +40,46 @@ export class Point {
 
 let textDecoder: TextDecoder | undefined;
 
+const WIRE_TYPE_MASK = 0x7;
+const COMMAND_ID_MASK = 0x7;
+
+const WireType = {
+  Varint: 0,
+  Bit64: 1,
+  LengthDelimited: 2,
+  Bit32: 5,
+} as const;
+
+const TileTag = {
+  Layers: (3 << 3) | WireType.LengthDelimited, // 26
+} as const;
+
+const LayerTag = {
+  Name: (1 << 3) | WireType.LengthDelimited, // 10
+  Features: (2 << 3) | WireType.LengthDelimited, // 18
+  Keys: (3 << 3) | WireType.LengthDelimited, // 26
+  Values: (4 << 3) | WireType.LengthDelimited, // 34
+  Extent: (5 << 3) | WireType.Varint, // 40
+  Version: (15 << 3) | WireType.Varint, // 120
+} as const;
+
+const ValueTag = {
+  String: (1 << 3) | WireType.LengthDelimited, // 10
+  Float: (2 << 3) | WireType.Bit32, // 21
+  Double: (3 << 3) | WireType.Bit64, // 25
+  Int: (4 << 3) | WireType.Varint, // 32
+  UInt: (5 << 3) | WireType.Varint, // 40
+  SInt: (6 << 3) | WireType.Varint, // 48
+  Bool: (7 << 3) | WireType.Varint, // 56
+} as const;
+
+const FeatureTag = {
+  Id: (1 << 3) | WireType.Varint, // 8
+  Tags: (2 << 3) | WireType.LengthDelimited, // 18
+  Type: (3 << 3) | WireType.Varint, // 24
+  Geometry: (4 << 3) | WireType.LengthDelimited, // 34
+} as const;
+
 // A vector tile.
 //
 // Contains all the non-empty layers indexed by name.
@@ -56,13 +96,13 @@ export class VectorTile {
     const end = reader.len;
     while (reader.pos < end) {
       const tag = reader.uint32();
-      if (tag == 26) {
+      if (tag == TileTag.Layers) {
         const layer = new Layer(reader, reader.uint32() + reader.pos, longType);
         if (layer.length) {
           this.layers[layer.name] = layer;
         }
       } else {
-        reader.skip(tag & 7);
+        reader.skip(tag & WIRE_TYPE_MASK);
       }
     }
   }
@@ -86,21 +126,21 @@ export class Layer<P = Record<string, PropValues>> implements Iterable<Feature<P
   constructor(private reader: BinaryReader, end: number, private longType: LongType) {
     while (reader.pos < end) {
       const tag = reader.uint32();
-      if (tag == 18) {
+      if (tag == LayerTag.Features) {
         this.featureOffsets.push(reader.pos);
         reader.pos = reader.uint32() + reader.pos;
-      } else if (tag == 10) {
+      } else if (tag == LayerTag.Name) {
         this.name = reader.string();
-      } else if (tag == 26) {
+      } else if (tag == LayerTag.Keys) {
         this.keys.push(reader.string());
-      } else if (tag == 34) {
+      } else if (tag == LayerTag.Values) {
         this.values.push(this.decodeValue());
-      } else if (tag == 40) {
+      } else if (tag == LayerTag.Extent) {
         this.extent = reader.uint32();
-      } else if (tag == 120) {
+      } else if (tag == LayerTag.Version) {
         this.version = reader.uint32();
       } else {
-        reader.skip(tag & 7);
+        reader.skip(tag & WIRE_TYPE_MASK);
       }
     }
 
@@ -132,29 +172,29 @@ export class Layer<P = Record<string, PropValues>> implements Iterable<Feature<P
     while (reader.pos < end) {
       const tag = reader.uint32();
       switch (tag) {
-        case 10:
+        case ValueTag.String:
           value = reader.string();
           break;
-        case 21:
+        case ValueTag.Float:
           value = reader.float();
           break;
-        case 25:
+        case ValueTag.Double:
           value = reader.double();
           break;
-        case 32:
+        case ValueTag.Int:
           value = this.convertLong(reader.int64());
           break;
-        case 40:
+        case ValueTag.UInt:
           value = this.convertLong(reader.uint64());
           break;
-        case 48:
+        case ValueTag.SInt:
           value = this.convertLong(reader.sint64());
           break;
-        case 56:
+        case ValueTag.Bool:
           value = reader.bool();
           break;
         default:
-          reader.skip(tag & 7);
+          reader.skip(tag & WIRE_TYPE_MASK);
       }
     }
     if (value === null) {
@@ -249,21 +289,21 @@ export class Feature<P = Record<string, PropValues>> {
   ) {
     while (reader.pos < end) {
       const tag = reader.uint32();
-      if (tag == 8) {
+      if (tag == FeatureTag.Id) {
         this.id = reader.uint64().toString();
-      } else if (tag == 18) {
+      } else if (tag == FeatureTag.Tags) {
         const tagsEnd = reader.uint32() + reader.pos;
         const props = this.properties as unknown as Record<string, PropValues>;
         while (reader.pos < tagsEnd) {
           props[keys[reader.uint32()]] = values[reader.uint32()];
         }
-      } else if (tag == 24) {
+      } else if (tag == FeatureTag.Type) {
         this.type = reader.uint32() as FeatureType;
-      } else if (tag == 34) {
+      } else if (tag == FeatureTag.Geometry) {
         this.geometryOffset = reader.pos;
         reader.pos = reader.uint32() + reader.pos;
       } else {
-        reader.skip(tag & 7);
+        reader.skip(tag & WIRE_TYPE_MASK);
       }
     }
   }
@@ -284,7 +324,7 @@ export class Feature<P = Record<string, PropValues>> {
 
     while (reader.pos < end) {
       const cmdLen = reader.uint32();
-      const cmd = cmdLen & 0x7;
+      const cmd = cmdLen & COMMAND_ID_MASK;
       let count = cmdLen >>> 3;
       if (count == 0) {
         continue;
@@ -471,7 +511,7 @@ export class Feature<P = Record<string, PropValues>> {
 
     while (reader.pos < end) {
       const cmdLen = reader.uint32();
-      const cmd = cmdLen & 0x7;
+      const cmd = cmdLen & COMMAND_ID_MASK;
       let count = cmdLen >>> 3;
       if (count == 0) {
         continue;
