@@ -342,6 +342,42 @@ describe('TypeScript types', () => {
   });
 });
 
+describe('iteration and accessors', () => {
+  const data = fs.readFileSync(__dirname + '/fixtures/14-8801-5371.vector.pbf');
+  const tile = new VectorTile(data);
+
+  it('iterates layer features via Symbol.iterator and Array.from', () => {
+    const layer = tile.layers.bridge;
+    const viaIterator = [];
+    const it = layer[Symbol.iterator]();
+    for (let step = it.next(); !step.done; step = it.next()) {
+      viaIterator.push(step.value.id);
+    }
+    expect(viaIterator.length).toBe(layer.length);
+
+    const viaArrayFrom = Array.from(layer);
+    expect(viaArrayFrom.length).toBe(layer.length);
+    expect(viaArrayFrom.map((f) => f.id)).toEqual(viaIterator);
+
+    // Re-iterating the same layer starts fresh from index 0
+    const poiLayer = tile.layers.poi_label;
+    expect(Array.from(poiLayer).length).toBe(poiLayer.length);
+    expect(Array.from(poiLayer).length).toBe(poiLayer.length);
+  });
+
+  it('provides getLayer with prototype safety and generics', () => {
+    interface BridgeProps {
+      class: string;
+    }
+
+    const bridge = tile.getLayer<BridgeProps>('bridge');
+    expect(bridge).toBe(tile.layers.bridge);
+    expect(bridge?.feature(0).properties.class).toBe('service');
+    expect(tile.getLayer('nonexistent')).toBeUndefined();
+    expect(tile.getLayer('toString')).toBeUndefined();
+  });
+});
+
 // Custom matchers
 
 function approximateDeepEqual(a: any, b: any, epsilon: number): [boolean, string] {
