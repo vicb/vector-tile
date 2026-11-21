@@ -38,6 +38,8 @@ export class Point {
   constructor(public readonly x: number, public readonly y: number) { }
 }
 
+let textDecoder: TextDecoder | undefined;
+
 // A vector tile.
 //
 // Contains all the non-empty layers indexed by name.
@@ -47,7 +49,10 @@ export class VectorTile {
 
   // The constructor takes a byte buffer.
   constructor(bytes: Uint8Array, longType: LongType = "number") {
-    const reader = new BinaryReader(bytes);
+    const reader = new BinaryReader(
+      bytes,
+      textDecoder || (textDecoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true })),
+    );
     const end = reader.len;
     while (reader.pos < end) {
       const tag = reader.uint32();
@@ -92,7 +97,7 @@ export class Layer<P = Record<string, PropValues>> implements Iterable<Feature<P
         this.extent = reader.uint32();
       } else if (fieldId == 2) {
         this.featureOffsets.push(reader.pos);
-        reader.skip(tag & 7);
+        reader.pos = reader.uint32() + reader.pos;
       } else if (fieldId == 3) {
         this.keys.push(reader.string());
       } else if (fieldId == 4) {
@@ -257,7 +262,7 @@ export class Feature<P = Record<string, PropValues>> {
         this.type = reader.uint32() as FeatureType;
       } else if (fieldId == 4) {
         this.geometryOffset = reader.pos;
-        reader.skip(tag & 7);
+        reader.pos = reader.uint32() + reader.pos;
       } else {
         reader.skip(tag & 7);
       }
