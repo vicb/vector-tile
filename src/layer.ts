@@ -33,8 +33,13 @@ export class Layer<P = Record<string, PropValues>> implements Iterable<Feature<P
     while (reader.pos < end) {
       const tag = reader.uint32();
       if (tag == LayerTag.Features) {
-        this.featureOffsets.push(reader.pos);
-        reader.pos = reader.uint32() + reader.pos;
+        const featLenPos = reader.pos;
+        const featLen = reader.uint32();
+        if (reader.pos + featLen > end) {
+          throw new Error('feature extends past layer end');
+        }
+        this.featureOffsets.push(featLenPos);
+        reader.pos = featLen + reader.pos;
       } else if (tag == LayerTag.Name) {
         this.name = reader.string();
       } else if (tag == LayerTag.Keys) {
@@ -62,7 +67,7 @@ export class Layer<P = Record<string, PropValues>> implements Iterable<Feature<P
    * @returns The decoded Feature instance.
    */
   feature<FP = P>(index: number): Feature<FP> {
-    if (index < 0 || index >= this.length) {
+    if (!Number.isInteger(index) || index < 0 || index >= this.length) {
       throw new Error('out of bounds');
     }
     this.reader.pos = this.featureOffsets[index];
