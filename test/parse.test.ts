@@ -1,7 +1,7 @@
 import fs from 'fs';
 import type { Feature as GeoJSONFeatureType, MultiPolygon, Polygon } from 'geojson';
 
-import { FeatureType, GeoJSONFeature, VectorTile } from '../src/index';
+import { Coord2D, FeatureType, GeoJSONFeature, VectorTile } from '../src/index';
 
 describe('FeatureType', () => {
   it('is available as a runtime object', () => {
@@ -378,34 +378,35 @@ describe('iteration and accessors', () => {
   });
 });
 
+function pushVarint(out: number[], v: number): void {
+  let n = v >>> 0;
+  while (n >= 0x80) {
+    out.push((n & 0x7f) | 0x80);
+    n >>>= 7;
+  }
+  out.push(n);
+}
+
+function lenField(fieldId: number, payload: number[]): number[] {
+  const out: number[] = [];
+  pushVarint(out, (fieldId << 3) | 2);
+  pushVarint(out, payload.length);
+  for (let i = 0; i < payload.length; i++) out.push(payload[i]);
+  return out;
+}
+
+function strField(fieldId: number, s: string): number[] {
+  return lenField(fieldId, Array.from(Buffer.from(s, 'utf8')));
+}
+
+function varintField(fieldId: number, v: number): number[] {
+  const out: number[] = [];
+  pushVarint(out, (fieldId << 3) | 0);
+  pushVarint(out, v);
+  return out;
+}
+
 describe('MVT v2 spec hardening and longType', () => {
-  function pushVarint(out: number[], v: number): void {
-    let n = v >>> 0;
-    while (n >= 0x80) {
-      out.push((n & 0x7f) | 0x80);
-      n >>>= 7;
-    }
-    out.push(n);
-  }
-
-  function lenField(fieldId: number, payload: number[]): number[] {
-    const out: number[] = [];
-    pushVarint(out, (fieldId << 3) | 2);
-    pushVarint(out, payload.length);
-    for (let i = 0; i < payload.length; i++) out.push(payload[i]);
-    return out;
-  }
-
-  function strField(fieldId: number, s: string): number[] {
-    return lenField(fieldId, Array.from(Buffer.from(s, 'utf8')));
-  }
-
-  function varintField(fieldId: number, v: number): number[] {
-    const out: number[] = [];
-    pushVarint(out, (fieldId << 3) | 0);
-    pushVarint(out, v);
-    return out;
-  }
 
   it('defaults version to 1 and extent to 4096 when omitted', () => {
     const featureBytes = [
@@ -502,6 +503,104 @@ describe('MVT v2 spec hardening and longType', () => {
     );
     const asNumber = new VectorTile(safeTile, 'number').layers.longs.feature(0);
     expect(asNumber.properties.n).toBe(42);
+  });
+});
+
+describe('flat geometry and transform callbacks', () => {
+  const tile = new VectorTile(fs.readFileSync(__dirname + '/fixtures/14-8801-5371.vector.pbf'));
+  const toTuple = (x: number, y: number): Coord2D => [x, y];
+
+  it('loads flat geometry for point, multi-point, line, multi-line, polygon, polygon-with-inner, multi-polygon, and empty', () => {
+    const point = tile.layers.poi_label.feature(11).loadFlatGeometry();
+    expect(point).toEqual({ coords: [3898, 1731], ends: [2] });
+
+    const mpTile = new VectorTile(fs.readFileSync(__dirname + '/fixtures/multi-point.pbf'));
+    expect(mpTile.layers.geojson.feature(0).loadFlatGeometry().ends).toEqual([2, 4]);
+
+    const road = tile.layers.road.feature(656).loadFlatGeometry();
+    expect(road).toEqual({ coords: [1988, 306, 1808, 321, 1506, 347], ends: [6] });
+
+    const mlTile = new VectorTile(fs.readFileSync(__dirname + '/fixtures/multi-line.pbf'));
+    expect(mlTile.layers.geojson.feature(0).loadFlatGeometry().ends.length).toBe(2);
+
+    const pwiTile = new VectorTile(fs.readFileSync(__dirname + '/fixtures/polygon-with-inner.pbf'));
+    const pwiFlat = pwiTile.layers.geojson.feature(0).loadFlatGeometry();
+    expect(pwiFlat.ends).toEqual([10, 20]);
+
+    const mpPolyTile = new VectorTile(fs.readFileSync(__dirname + '/fixtures/multi-polygon.pbf'));
+    const mpPolyFlat = mpPolyTile.layers.geojson.feature(0).loadFlatGeometry();
+    expect(mpPolyFlat.ends).toEqual([8, 16]);
+
+    // Empty geometry
+    const emptyTile = new VectorTile(new Uint8Array(lenField(3, [...strField(1, 'e'), ...lenField(2, varintField(3, FeatureType.POINT))])));
+    expect(emptyTile.layers.e.feature(0).loadFlatGeometry()).toEqual({ coords: [], ends: [] });
+  });
+
+  it('transforms vertices via loadGeometry, asPoints, asLines, and asPolygons', () => {
+    const pointFeat = tile.layers.poi_label.feature(11);
+    expect(pointFeat.loadGeometry(toTuple)).toEqual([[[3898, 1731]]]);
+    expect(pointFeat.asPoints(toTuple)).toEqual([[3898, 1731]]);
+    expect(pointFeat.asLines(toTuple)).toBeNull();
+    expect(pointFeat.asPolygons(toTuple)).toBeNull();
+
+    const roadFeat = tile.layers.road.feature(656);
+    expect(roadFeat.asLines(toTuple)).toEqual([
+      [
+        [1988, 306],
+        [1808, 321],
+        [1506, 347],
+      ],
+    ]);
+    expect(roadFeat.asPoints(toTuple)).toBeNull();
+
+    const pwiTile = new VectorTile(fs.readFileSync(__dirname + '/fixtures/polygon-with-inner.pbf'));
+    const polyFeat = pwiTile.layers.geojson.feature(0);
+    expect(polyFeat.asPolygons(toTuple)).toEqual(
+      polyFeat.asPolygons()!.map((poly) => poly.map((ring) => ring.map((p) => [p.x, p.y]))),
+    );
+
+    const stackedTile = new VectorTile(fs.readFileSync(__dirname + '/fixtures/stacked-multipolygon.pbf'));
+    const stackedFeat = stackedTile.layers.geojson.feature(0);
+    expect(stackedFeat.asPolygons(toTuple)).toEqual(
+      stackedFeat.asPolygons()!.map((poly) => poly.map((ring) => ring.map((p) => [p.x, p.y]))),
+    );
+  });
+
+  it('is re-entrant and exception-safe across nested geometry calls', () => {
+    const f1 = tile.layers.road.feature(656);
+    const f2 = tile.layers.building.feature(0);
+
+    const nestedBboxes: number[][] = [];
+    const result = f1.loadGeometry((x, y) => {
+      nestedBboxes.push(f2.bbox());
+      expect(f2.loadGeometry().length).toBeGreaterThan(0);
+      return `${x},${y}`;
+    });
+    expect(result).toEqual([['1988,306', '1808,321', '1506,347']]);
+    expect(nestedBboxes.length).toBe(3);
+
+    expect(() =>
+      f1.loadGeometry(() => {
+        throw new Error('boom');
+      }),
+    ).toThrow('boom');
+
+    // Subsequent geometry calls still return clean results
+    expect(f1.loadGeometry()).toEqual([
+      [
+        { x: 1988, y: 306 },
+        { x: 1808, y: 321 },
+        { x: 1506, y: 347 },
+      ],
+    ]);
+    expect(f2.bbox()).toEqual(f2.bbox());
+  });
+
+  it('throws on FeatureType.UNKNOWN in toGeoJSON', () => {
+    const unknownTile = new VectorTile(
+      new Uint8Array(lenField(3, [...strField(1, 'u'), ...lenField(2, varintField(3, FeatureType.UNKNOWN))])),
+    );
+    expect(() => unknownTile.layers.u.feature(0).toGeoJSON(0, 0, 0)).toThrow('Unknown feature type');
   });
 });
 
