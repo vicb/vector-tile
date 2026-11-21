@@ -2,7 +2,8 @@
 import fs from 'fs';
 import type { Feature as GeoJSONFeatureType, MultiPolygon, Polygon } from 'geojson';
 
-import { Coord2D, FeatureType, GeoJSONFeature, Layer, VectorTile } from '../src/index';
+import { Coord2D, FeatureType, GeoJSONFeature, Layer, Point, VectorTile } from '../src/index';
+import { classifyRings } from '../src/tile';
 
 describe('FeatureType', () => {
   it('is available as a runtime object', () => {
@@ -634,6 +635,44 @@ describe('upstream bug fixes', () => {
     expect(Object.getPrototypeOf(feature.properties)).toBeNull();
     expect(feature.properties['__proto__']).toBe('evil');
     expect(({} as Record<string, unknown>).evil).toBeUndefined();
+  });
+
+  it('supports CCW exterior polygon rings with CW holes', () => {
+    // Outer CCW: (0,0)->(0,10)->(10,10)->(10,0)->(0,0)
+    // Inner CW:  (2,2)->(8,2)->(8,8)->(2,8)->(2,2)
+    const geom = [9, 0, 0, 26, 0, 20, 20, 0, 0, 19, 15, 9, 15, 4, 26, 12, 0, 0, 12, 11, 0, 15];
+    const featBytes = [...varintField(3, FeatureType.POLYGON), ...lenField(4, geom)];
+    const layerBytes = [...strField(1, 'ccw'), ...lenField(2, featBytes), ...varintField(5, 4096)];
+    const tile = new VectorTile(new Uint8Array(lenField(3, layerBytes)));
+    const feature = tile.layers.ccw.feature(0);
+
+    const polys = feature.asPolygons((x, y): Coord2D => [x, y]);
+    expect(polys).toEqual([
+      [
+        [
+          [0, 0],
+          [0, 10],
+          [10, 10],
+          [10, 0],
+          [0, 0],
+        ],
+        [
+          [2, 2],
+          [8, 2],
+          [8, 8],
+          [2, 8],
+          [2, 2],
+        ],
+      ],
+    ]);
+
+    const geo = feature.toGeoJSON(0, 0, 0);
+    expect(geo.geometry.type).toBe('Polygon');
+    expect((geo.geometry as Polygon).coordinates.length).toBe(2);
+
+    const ptRings = feature.loadGeometry();
+    expect(classifyRings(ptRings)).toEqual(feature.asPolygons());
+    expect(classifyRings([[new Point(0, 0)]])).toEqual([[[new Point(0, 0)]]]);
   });
 });
 
