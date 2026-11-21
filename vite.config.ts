@@ -21,6 +21,7 @@ export default defineConfig({
   plugins: [
     dts({
       include: ['src'],
+      exclude: ['src/**/*.{test,spec}.ts', 'src/test-helper.ts', 'src/fixtures/**'],
     }),
   ],
 });
