@@ -674,6 +674,30 @@ describe('upstream bug fixes', () => {
     expect(classifyRings(ptRings)).toEqual(feature.asPolygons());
     expect(classifyRings([[new Point(0, 0)]])).toEqual([[[new Point(0, 0)]]]);
   });
+
+  it('skips zero-count geometry commands', () => {
+    // MoveTo(count=0) -> 0, MoveTo(count=1) (3, 4) -> 9, 6, 8
+    const featBytes = [...varintField(1, 1), ...varintField(3, FeatureType.POINT), ...lenField(4, [0, 9, 6, 8])];
+    const layerBytes = [...strField(1, 'layer'), ...lenField(2, featBytes), ...varintField(5, 4096)];
+    const tile = new VectorTile(new Uint8Array(lenField(3, layerBytes)));
+    const feature = tile.layers.layer.feature(0);
+
+    expect(feature.loadGeometry()).toEqual([[{ x: 3, y: 4 }]]);
+    expect(feature.loadFlatGeometry()).toEqual({ coords: [3, 4], ends: [2] });
+    expect(feature.bbox()).toEqual([3, 4, 3, 4]);
+  });
+
+  it('throws on unknown non-zero geometry commands', () => {
+    // cmd=3, count=1 -> (1 << 3) | 3 = 11
+    const featBytes = [...varintField(3, FeatureType.POINT), ...lenField(4, [11])];
+    const layerBytes = [...strField(1, 'layer'), ...lenField(2, featBytes)];
+    const tile = new VectorTile(new Uint8Array(lenField(3, layerBytes)));
+    const feature = tile.layers.layer.feature(0);
+
+    expect(() => feature.loadGeometry()).toThrow('unknown command 3');
+    expect(() => feature.loadFlatGeometry()).toThrow('unknown command 3');
+    expect(() => feature.bbox()).toThrow('unknown command 3');
+  });
 });
 
 // Custom matchers
