@@ -56,7 +56,7 @@ export class VectorTile {
     const end = reader.len;
     while (reader.pos < end) {
       const tag = reader.uint32();
-      if (tag >>> 3 == 3) {
+      if (tag == 26) {
         const layer = new Layer(reader, reader.uint32() + reader.pos, longType);
         if (layer.length) {
           this.layers[layer.name] = layer;
@@ -86,20 +86,19 @@ export class Layer<P = Record<string, PropValues>> implements Iterable<Feature<P
   constructor(private reader: BinaryReader, end: number, private longType: LongType) {
     while (reader.pos < end) {
       const tag = reader.uint32();
-      const fieldId = tag >>> 3;
-      if (fieldId == 15) {
-        this.version = reader.uint32();
-      } else if (fieldId == 1) {
-        this.name = reader.string();
-      } else if (fieldId == 5) {
-        this.extent = reader.uint32();
-      } else if (fieldId == 2) {
+      if (tag == 18) {
         this.featureOffsets.push(reader.pos);
         reader.pos = reader.uint32() + reader.pos;
-      } else if (fieldId == 3) {
+      } else if (tag == 10) {
+        this.name = reader.string();
+      } else if (tag == 26) {
         this.keys.push(reader.string());
-      } else if (fieldId == 4) {
+      } else if (tag == 34) {
         this.values.push(this.decodeValue());
+      } else if (tag == 40) {
+        this.extent = reader.uint32();
+      } else if (tag == 120) {
+        this.version = reader.uint32();
       } else {
         reader.skip(tag & 7);
       }
@@ -132,26 +131,26 @@ export class Layer<P = Record<string, PropValues>> implements Iterable<Feature<P
     let value: PropValues = null;
     while (reader.pos < end) {
       const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
+      switch (tag) {
+        case 10:
           value = reader.string();
           break;
-        case 2:
+        case 21:
           value = reader.float();
           break;
-        case 3:
+        case 25:
           value = reader.double();
           break;
-        case 4:
+        case 32:
           value = this.convertLong(reader.int64());
           break;
-        case 5:
+        case 40:
           value = this.convertLong(reader.uint64());
           break;
-        case 6:
+        case 48:
           value = this.convertLong(reader.sint64());
           break;
-        case 7:
+        case 56:
           value = reader.bool();
           break;
         default:
@@ -247,18 +246,17 @@ export class Feature<P = Record<string, PropValues>> {
   ) {
     while (reader.pos < end) {
       const tag = reader.uint32();
-      const fieldId = tag >>> 3;
-      if (fieldId == 1) {
+      if (tag == 8) {
         this.id = reader.uint64().toString();
-      } else if (fieldId == 2) {
+      } else if (tag == 18) {
         const tagsEnd = reader.uint32() + reader.pos;
         const props = this.properties as unknown as Record<string, PropValues>;
         while (reader.pos < tagsEnd) {
           props[keys[reader.uint32()]] = values[reader.uint32()];
         }
-      } else if (fieldId == 3) {
+      } else if (tag == 24) {
         this.type = reader.uint32() as FeatureType;
-      } else if (fieldId == 4) {
+      } else if (tag == 34) {
         this.geometryOffset = reader.pos;
         reader.pos = reader.uint32() + reader.pos;
       } else {
