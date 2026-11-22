@@ -3,7 +3,8 @@ import type { Feature as GeoJSONFeature, Geometry as GeoJSONGeometry, Position }
 
 import { Command, COMMAND_ID_MASK, FeatureTag, WIRE_TYPE_MASK } from './constants';
 import { Point } from './point';
-import type { FlatGeometry, GeoJSONFeatureGeometry, PropValues } from './types';
+import { classifyRingsFlat, signedAreaFlat } from './classify';
+import type { FlatGeoGeometry, FlatGeoPolygon, FlatGeometry, GeoJSONFeatureGeometry, PropValues } from './types';
 
 /**
  * Mapbox Vector Tile geometry types as defined in the MVT specification.
@@ -26,6 +27,9 @@ export type FeatureType = (typeof FeatureType)[keyof typeof FeatureType];
 
 const DEG_TO_RAD = Math.PI / 180;
 const RAD_TO_DEG = 360 / Math.PI;
+// Pre-allocated empty typed arrays to avoid allocations for empty geometries.
+const EMPTY_FLOAT64 = new Float64Array(0);
+const EMPTY_UINT32 = new Uint32Array(0);
 const MAX_SCRATCH_COORDS = 8192;
 const MAX_SCRATCH_ENDS = 1024;
 let scratchCoords: number[] | null = [];
@@ -57,23 +61,6 @@ function mapRing<T>(
     }
   }
   return ring;
-}
-
-function signedAreaFlat(coords: number[], start: number, end: number): number {
-  if (end - start < 6) {
-    return 0;
-  }
-  let sum = 0;
-  let p2x = coords[end - 2];
-  let p2y = coords[end - 1];
-  for (let i = start; i < end; i += 2) {
-    const p1x = coords[i];
-    const p1y = coords[i + 1];
-    sum += (p2x - p1x) * (p1y + p2y);
-    p2x = p1x;
-    p2y = p1y;
-  }
-  return sum;
 }
 
 /**
@@ -321,6 +308,61 @@ export class Feature<P = Record<string, PropValues>> {
   }
 
   /**
+   * Lazily decodes the feature geometry and projects it into flat WGS84 coordinates.
+   *
+   * Highly optimized for WebGL, WebAssembly, and Worker transfers with contiguous typed arrays.
+   *
+   * @param x - Tile column (X) in the Web Mercator tile pyramid.
+   * @param y - Tile row (Y) in the Web Mercator tile pyramid.
+   * @param zoom - Zoom level of the tile.
+   * @returns An object with interleaved WGS84 `coords` (`Float64Array`) and component `ends` (`Uint32Array`).
+   * @throws Error if the feature has no geometry.
+   */
+  toFlatGeoGeometry(x: number, y: number, zoom: number): FlatGeoGeometry {
+    const coords = scratchCoords || [];
+    const ends = scratchEnds || [];
+    scratchCoords = scratchEnds = null;
+    try {
+      const numRings = this.readGeometry(coords, ends);
+      if (numRings === 0) {
+        return {
+          coords: EMPTY_FLOAT64,
+          ends: EMPTY_UINT32,
+        };
+      }
+      const numCoords = ends[numRings - 1];
+      const geoCoords = new Float64Array(numCoords);
+      const geoEnds = numRings === 1 ? new Uint32Array([numCoords]) : new Uint32Array(numRings);
+
+      const size = this.extent * (zoom < 31 ? 1 << zoom : 2 ** zoom);
+      const x0 = this.extent * x;
+      const y0 = this.extent * y;
+      const degScale = 360 / size;
+
+      for (let i = 0; i < numCoords; i += 2) {
+        const px = coords[i];
+        const py = coords[i + 1];
+        const y2 = 180 - (py + y0) * degScale;
+        geoCoords[i] = (px + x0) * degScale - 180;
+        geoCoords[i + 1] = RAD_TO_DEG * Math.atan(Math.exp(y2 * DEG_TO_RAD)) - 90;
+      }
+
+      if (numRings > 1) {
+        for (let r = 0; r < numRings; r++) {
+          geoEnds[r] = ends[r];
+        }
+      }
+
+      return {
+        coords: geoCoords,
+        ends: geoEnds,
+      };
+    } finally {
+      releaseScratch(coords, ends);
+    }
+  }
+
+  /**
    * Lazily decodes the feature geometry into rings of Points.
    *
    * @returns Array of rings where each ring is an array of `Point` instances.
@@ -527,6 +569,28 @@ export class Feature<P = Record<string, PropValues>> {
     return this.type === FeatureType.POLYGON
       ? (this.buildPolygons(this.createProjector(x, y, zoom)) as Position[][][])
       : null;
+  }
+
+  /**
+   * Projects and returns the geometry as classified WGS84 polygons in contiguous typed arrays,
+   * or `null` if `type !== FeatureType.POLYGON`.
+   *
+   * @param x - Tile column (X) in the Web Mercator tile pyramid.
+   * @param y - Tile row (Y) in the Web Mercator tile pyramid.
+   * @param zoom - Zoom level of the tile.
+   * @returns An object with WGS84 `coords` (`Float64Array`), `ringEnds` (`Uint32Array`), and `polygonEnds` (`Uint32Array`), or null.
+   * @throws Error if the feature has no geometry.
+   */
+  toFlatGeoPolygons(x: number, y: number, zoom: number): FlatGeoPolygon | null {
+    if (this.type !== FeatureType.POLYGON) {
+      return null;
+    }
+    const { coords, ends: ringEnds } = this.toFlatGeoGeometry(x, y, zoom);
+    return {
+      coords,
+      ringEnds,
+      polygonEnds: classifyRingsFlat(coords, ringEnds),
+    };
   }
 
   /**
