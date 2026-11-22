@@ -374,6 +374,16 @@ describe('Feature and FeatureType', () => {
     expect(nested[0][0].innerLen).toBe(3);
   });
 
+  it('caches bbox during readGeometry', () => {
+    const feat = tile.layers.road.feature(656);
+    // @ts-expect-error private property access for test
+    expect(feat._bbox).toBeUndefined();
+    feat.loadGeometry();
+    // @ts-expect-error private property access for test
+    expect(feat._bbox).toEqual([1506, 306, 1988, 347]);
+    expect(feat.bbox()).toEqual([1506, 306, 1988, 347]);
+  });
+
   it('handles empty and missing geometry error conditions', () => {
     const emptyFeatLayer = new Uint8Array(lenField(3, [...strField(1, 'l'), ...lenField(2, [])]));
     const feat = new VectorTile(emptyFeatLayer).layers.l.feature(0);
