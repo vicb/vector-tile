@@ -235,7 +235,7 @@ export class Feature<P = Record<string, PropValues>> {
     try {
       const numRings = this.readGeometry(coords, ends);
       if (numRings == 0) {
-        return [[]];
+        return [];
       }
       if (numRings == 1) {
         return [[mapRing(coords, 0, ends[0], transform)]];
