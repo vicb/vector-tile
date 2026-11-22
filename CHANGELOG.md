@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.2.0
+
+- Added `FlatGeoGeometry` and `FlatGeoPolygon` interfaces for zero-allocation contiguous TypedArray geometry pipelines.
+- Added `classifyRingsFlat` and `signedAreaFlat` for flat coordinate ring winding calculation and polygon hierarchy determination.
+- Added `Feature.toFlatGeoGeometry(x, y, zoom)` projecting geometries directly into `Float64Array` coords and `Uint32Array` ends.
+- Added `Feature.toFlatGeoPolygons(x, y, zoom)` returning classified WGS84 polygons with `ringEnds` and `polygonEnds` in contiguous typed arrays.
+- Re-exported `signedArea` and `signedAreaFlat` utilities.
+- Optimized bundle for tree-shaking with `"sideEffects": false` and modular ESM chunk outputs.
+
 ## 1.1.0
 
 - Added direct geographic coordinate accessors `Feature.toGeoPoints(x, y, zoom)`, `Feature.toGeoLines(x, y, zoom)`, and `Feature.toGeoPolygons(x, y, zoom)` returning WGS84 coordinates without GeoJSON wrapper allocations.
