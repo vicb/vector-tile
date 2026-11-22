@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.1.0
+
+- Added direct geographic coordinate accessors `Feature.toGeoPoints(x, y, zoom)`, `Feature.toGeoLines(x, y, zoom)`, and `Feature.toGeoPolygons(x, y, zoom)` returning WGS84 coordinates without GeoJSON wrapper allocations.
+- Added fast geographic bounding box accessor `Feature.geoBbox(x, y, zoom)` returning `[minLon, minLat, maxLon, maxLat]` in $O(1)$ time by projecting bounding corners.
+- Cached bounding box (`_bbox`) during geometry decoding (`readGeometry()`), enabling instant $O(1)$ `bbox()` and `geoBbox()` lookups after calling `loadGeometry`, `loadFlatGeometry`, `as*`, or `toGeo*`.
+- Refactored `toGeoJSON()` to delegate internally to direct geographic coordinate accessors.
+- Fixed `buildPolygons()` / `asPolygons()` to return an empty array `[]` instead of `[[]]` when a polygon feature contains no rings.
+
 ## 1.0.0
 
 - Added generic property types for `VectorTile.getLayer<P>()`, `Layer.feature<P>()`, and `Feature.toGeoJSON<P>()`.
