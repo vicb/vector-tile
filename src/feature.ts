@@ -133,6 +133,11 @@ export class Feature<P = Record<string, PropValues>> {
     let ci = 0;
     let ei = 0;
     let ringStart = -1;
+    const trackBbox = !this._bbox;
+    let xMin = Infinity;
+    let xMax = -Infinity;
+    let yMin = Infinity;
+    let yMax = -Infinity;
 
     while (reader.pos < end) {
       const cmdLen = reader.uint32();
@@ -146,6 +151,12 @@ export class Feature<P = Record<string, PropValues>> {
         while (count-- > 0 && reader.pos < end) {
           x += reader.sint32();
           y += reader.sint32();
+          if (trackBbox) {
+            if (x > xMax) xMax = x;
+            if (x < xMin) xMin = x;
+            if (y > yMax) yMax = y;
+            if (y < yMin) yMin = y;
+          }
           if (ringStart >= 0) {
             ends[ei++] = ci;
           }
@@ -158,6 +169,12 @@ export class Feature<P = Record<string, PropValues>> {
           while (count-- > 0 && reader.pos < end) {
             x += reader.sint32();
             y += reader.sint32();
+            if (trackBbox) {
+              if (x > xMax) xMax = x;
+              if (x < xMin) xMin = x;
+              if (y > yMax) yMax = y;
+              if (y < yMin) yMin = y;
+            }
             coords[ci++] = x;
             coords[ci++] = y;
           }
@@ -179,6 +196,10 @@ export class Feature<P = Record<string, PropValues>> {
 
     if (ringStart >= 0) {
       ends[ei++] = ci;
+    }
+
+    if (trackBbox) {
+      this._bbox = [xMin, yMin, xMax, yMax];
     }
 
     return ei;
