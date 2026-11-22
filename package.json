@@ -1,6 +1,6 @@
 {
   "name": "mapbox-vector-tile",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Parses mapbox vector tiles",
   "author": "Victor Berchet",
   "license": "MIT",
