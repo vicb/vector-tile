@@ -395,6 +395,18 @@ export class Feature<P = Record<string, PropValues>> {
     return (this._bbox = [xMin, yMin, xMax, yMax]);
   }
 
+  private createProjector(x: number, y: number, zoom: number): (px: number, py: number) => Position {
+    const size = this.extent * (zoom < 31 ? 1 << zoom : 2 ** zoom);
+    const x0 = this.extent * x;
+    const y0 = this.extent * y;
+    const degScale = 360 / size;
+
+    return (px: number, py: number): Position => {
+      const y2 = 180 - (py + y0) * degScale;
+      return [(px + x0) * degScale - 180, RAD_TO_DEG * Math.atan(Math.exp(y2 * DEG_TO_RAD)) - 90];
+    };
+  }
+
   /**
    * Projects and converts the feature to a GeoJSON Feature object in WGS84 coordinates.
    *
@@ -410,17 +422,9 @@ export class Feature<P = Record<string, PropValues>> {
     y: number,
     zoom: number,
   ): GeoJSONFeature<Geom, Props> {
-    const size = this.extent * (zoom < 31 ? 1 << zoom : 2 ** zoom);
-    const x0 = this.extent * x;
-    const y0 = this.extent * y;
-    const degScale = 360 / size;
+    const project = this.createProjector(x, y, zoom);
     let coordinates: any;
     let type = '';
-
-    const project = (px: number, py: number): Position => {
-      const y2 = 180 - (py + y0) * degScale;
-      return [(px + x0) * degScale - 180, RAD_TO_DEG * Math.atan(Math.exp(y2 * DEG_TO_RAD)) - 90];
-    };
 
     switch (this.type) {
       case FeatureType.POINT:
