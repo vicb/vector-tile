@@ -9,10 +9,11 @@ export default defineConfig({
       formats: ['es'],
       fileName: () => 'index.js',
     },
-    rollupOptions: {
+    rolldownOptions: {
       external: ['@protobuf-ts/runtime', '@types/geojson'],
       output: {
-        entryFileNames: 'index.js',
+        preserveModules: true,
+        entryFileNames: '[name].js',
       },
     },
     sourcemap: true,
