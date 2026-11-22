@@ -37,6 +37,28 @@ export interface FlatGeometry {
 }
 
 /**
+ * Flat representation of decoded WGS84 geographic geometries.
+ */
+export interface FlatGeoGeometry {
+  /** Interleaved WGS84 coordinates: [lon0, lat0, lon1, lat1, ...] */
+  readonly coords: Float64Array;
+  /** Index offsets in `coords` where each ring/component ends. */
+  readonly ends: Uint32Array;
+}
+
+/**
+ * Flat representation of classified WGS84 polygons with outer boundaries and holes.
+ */
+export interface FlatGeoPolygon {
+  /** Interleaved WGS84 coordinates: [lon0, lat0, lon1, lat1, ...] */
+  readonly coords: Float64Array;
+  /** Index offsets in `coords` where each ring ends. */
+  readonly ringEnds: Uint32Array;
+  /** Index offsets in `ringEnds` where each polygon ends (for MultiPolygons). */
+  readonly polygonEnds: Uint32Array;
+}
+
+/**
  * Supported GeoJSON geometry types produced by `Feature.toGeoJSON()`.
  */
 export type GeoJSONFeatureGeometry =
