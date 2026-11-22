@@ -395,6 +395,25 @@ export class Feature<P = Record<string, PropValues>> {
     return (this._bbox = [xMin, yMin, xMax, yMax]);
   }
 
+  /**
+   * Computes and returns the 2D bounding box of the geometry in WGS84 coordinates
+   * as `[minLon, minLat, maxLon, maxLat]`.
+   *
+   * Runs in O(1) time by projecting the cached tile-coordinate bounding box.
+   *
+   * @param x - Tile column (X) in the Web Mercator tile pyramid.
+   * @param y - Tile row (Y) in the Web Mercator tile pyramid.
+   * @param zoom - Zoom level of the tile.
+   * @returns The bounding box `[minLon, minLat, maxLon, maxLat]`.
+   */
+  geoBbox(x: number, y: number, zoom: number): [minLon: number, minLat: number, maxLon: number, maxLat: number] {
+    const [xMin, yMin, xMax, yMax] = this.bbox();
+    const project = this.createProjector(x, y, zoom);
+    const [minLon, maxLat] = project(xMin, yMin);
+    const [maxLon, minLat] = project(xMax, yMax);
+    return [minLon, minLat, maxLon, maxLat];
+  }
+
   private createProjector(x: number, y: number, zoom: number): (px: number, py: number) => Position {
     const size = this.extent * (zoom < 31 ? 1 << zoom : 2 ** zoom);
     const x0 = this.extent * x;
