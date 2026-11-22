@@ -469,6 +469,49 @@ export class Feature<P = Record<string, PropValues>> {
   }
 
   /**
+   * Projects and returns the geometry as WGS84 points
+   * if `type === FeatureType.POINT`, or `null` otherwise.
+   *
+   * @param x - Tile column (X) in the Web Mercator tile pyramid.
+   * @param y - Tile row (Y) in the Web Mercator tile pyramid.
+   * @param zoom - Zoom level of the tile.
+   * @returns Array of points in [longitude, latitude] coordinates, or null.
+   */
+  toGeoPoints(x: number, y: number, zoom: number): Position[] | null {
+    return this.type === FeatureType.POINT ? (this.buildPoints(this.createProjector(x, y, zoom)) as Position[]) : null;
+  }
+
+  /**
+   * Projects and returns the geometry as WGS84 line strings
+   * if `type === FeatureType.LINESTRING`, or `null` otherwise.
+   *
+   * @param x - Tile column (X) in the Web Mercator tile pyramid.
+   * @param y - Tile row (Y) in the Web Mercator tile pyramid.
+   * @param zoom - Zoom level of the tile.
+   * @returns Array of line strings in [longitude, latitude] coordinates, or null.
+   */
+  toGeoLines(x: number, y: number, zoom: number): Position[][] | null {
+    return this.type === FeatureType.LINESTRING
+      ? (this.buildRings(this.createProjector(x, y, zoom)) as Position[][])
+      : null;
+  }
+
+  /**
+   * Projects and returns the geometry as classified WGS84 polygons (exterior rings followed by holes)
+   * if `type === FeatureType.POLYGON`, or `null` otherwise.
+   *
+   * @param x - Tile column (X) in the Web Mercator tile pyramid.
+   * @param y - Tile row (Y) in the Web Mercator tile pyramid.
+   * @param zoom - Zoom level of the tile.
+   * @returns Array of polygons in [longitude, latitude] coordinates, or null.
+   */
+  toGeoPolygons(x: number, y: number, zoom: number): Position[][][] | null {
+    return this.type === FeatureType.POLYGON
+      ? (this.buildPolygons(this.createProjector(x, y, zoom)) as Position[][][])
+      : null;
+  }
+
+  /**
    * Returns the geometry as points if `type === FeatureType.POINT`, or `null` otherwise.
    *
    * @returns Array of `Point` instances, or `null` if the feature is not a point.

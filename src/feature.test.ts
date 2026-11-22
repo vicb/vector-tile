@@ -325,6 +325,58 @@ describe('Feature and FeatureType', () => {
     expect(polygons![0].length).toBe(2); // Outer + inner
   });
 
+  it('provides direct geographic coordinate accessors: toGeoPoints, toGeoLines, and toGeoPolygons', () => {
+    // Point feature
+    const poiFeat = tile.layers.poi_label.feature(11);
+    expect(poiFeat.type).toBe(FeatureType.POINT);
+    expect(poiFeat.toGeoLines(8801, 5371, 14)).toBeNull();
+    expect(poiFeat.toGeoPolygons(8801, 5371, 14)).toBeNull();
+    const geoPoints = poiFeat.toGeoPoints(8801, 5371, 14);
+    expect(geoPoints).not.toBeNull();
+    expect(geoPoints).toEqual([[13.402258157730103, 52.543989253806245]]);
+
+    // LineString feature
+    const bridgeFeat = tile.layers.bridge.feature(0);
+    expect(bridgeFeat.type).toBe(FeatureType.LINESTRING);
+    expect(bridgeFeat.toGeoPoints(8801, 5371, 14)).toBeNull();
+    expect(bridgeFeat.toGeoPolygons(8801, 5371, 14)).toBeNull();
+    const geoLines = bridgeFeat.toGeoLines(8801, 5371, 14);
+    expect(geoLines).not.toBeNull();
+    expect(geoLines).toEqual([
+      [
+        [13.399457931518555, 52.54633484403641],
+        [13.399441838264465, 52.54650447852501],
+      ],
+    ]);
+
+    // Polygon feature
+    const buildingFeat = tile.layers.building.feature(0);
+    expect(buildingFeat.type).toBe(FeatureType.POLYGON);
+    expect(buildingFeat.toGeoPoints(8801, 5371, 14)).toBeNull();
+    expect(buildingFeat.toGeoLines(8801, 5371, 14)).toBeNull();
+    const geoPolys = buildingFeat.toGeoPolygons(8801, 5371, 14);
+    expect(geoPolys).not.toBeNull();
+    expect(geoPolys).toEqual([
+      [
+        [
+          [13.392285704612732, 52.54974045706257],
+          [13.392264246940613, 52.549737195107554],
+          [13.392248153686523, 52.549737195107554],
+          [13.392248153686523, 52.54974045706257],
+          [13.392285704612732, 52.54974045706257],
+        ],
+      ],
+    ]);
+
+    // Multi-polygon with inner ring
+    const pwiTile = new VectorTile(readFixture('polygon-with-inner.pbf'));
+    const pwiFeat = pwiTile.layers.geojson.feature(0);
+    const pwiPolys = pwiFeat.toGeoPolygons(0, 0, 0);
+    expect(pwiPolys).not.toBeNull();
+    expect(pwiPolys!.length).toBe(1);
+    expect(pwiPolys![0].length).toBe(2);
+  });
+
   it('supports in-place coordinate transform callbacks', () => {
     const roadFeature = tile.layers.road.feature(656);
     const transformed = roadFeature.loadGeometry((x, y) => [x * 2, y * 2] as Coord2D);
