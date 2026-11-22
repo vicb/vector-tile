@@ -8,5 +8,5 @@ export { VectorTile } from './tile';
 export { Layer } from './layer';
 export { Feature, FeatureType } from './feature';
 export { Point } from './point';
-export { classifyRings } from './classify';
+export { classifyRings, classifyRingsFlat } from './classify';
 export type * from './types';
