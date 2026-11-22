@@ -441,24 +441,23 @@ export class Feature<P = Record<string, PropValues>> {
     y: number,
     zoom: number,
   ): GeoJSONFeature<Geom, Props> {
-    const project = this.createProjector(x, y, zoom);
     let coordinates: any;
     let type = '';
 
     switch (this.type) {
       case FeatureType.POINT:
         type = 'Point';
-        coordinates = this.buildPoints(project);
+        coordinates = this.toGeoPoints(x, y, zoom)!;
         break;
 
       case FeatureType.LINESTRING:
         type = 'LineString';
-        coordinates = this.buildRings(project);
+        coordinates = this.toGeoLines(x, y, zoom)!;
         break;
 
       case FeatureType.POLYGON:
         type = 'Polygon';
-        coordinates = this.buildPolygons(project);
+        coordinates = this.toGeoPolygons(x, y, zoom)!;
         break;
 
       default:
