@@ -1,11 +1,32 @@
-import type { MultiPolygon, Polygon } from 'geojson';
+import type { MultiPolygon, Polygon, Position } from 'geojson';
 import { describe, expect, it } from 'vitest';
 
 import { FeatureType } from './feature';
 import { Point } from './point';
 import { lenField, readFixture, strField, varintField } from './test-helper';
 import { VectorTile } from './tile';
-import type { Coord2D } from './types';
+import type { Coord2D, FlatGeoPolygon } from './types';
+
+function unpackFlatGeoPolygon(flat: FlatGeoPolygon): Position[][][] {
+  const polygons: Position[][][] = [];
+  let ringStartIdx = 0;
+  for (let p = 0; p < flat.polygonEnds.length; p++) {
+    const ringEndIdx = flat.polygonEnds[p];
+    const rings: Position[][] = [];
+    for (let r = ringStartIdx; r < ringEndIdx; r++) {
+      const coordStart = r === 0 ? 0 : flat.ringEnds[r - 1];
+      const coordEnd = flat.ringEnds[r];
+      const ring: Position[] = [];
+      for (let c = coordStart; c < coordEnd; c += 2) {
+        ring.push([flat.coords[c], flat.coords[c + 1]]);
+      }
+      rings.push(ring);
+    }
+    polygons.push(rings);
+    ringStartIdx = ringEndIdx;
+  }
+  return polygons;
+}
 
 describe('Feature and FeatureType', () => {
   it('exposes FeatureType as a runtime object and enum', () => {
@@ -377,6 +398,52 @@ describe('Feature and FeatureType', () => {
     expect(pwiPolys![0].length).toBe(2);
   });
 
+  it('provides toFlatGeoPolygons returning classified polygons in contiguous typed arrays', () => {
+    // Non-polygon features return null
+    const poiFeat = tile.layers.poi_label.feature(11);
+    expect(poiFeat.toFlatGeoPolygons(8801, 5371, 14)).toBeNull();
+    const roadFeat = tile.layers.road.feature(656);
+    expect(roadFeat.toFlatGeoPolygons(8801, 5371, 14)).toBeNull();
+
+    // Single polygon feature
+    const buildingFeat = tile.layers.building.feature(0);
+    const flatBuilding = buildingFeat.toFlatGeoPolygons(8801, 5371, 14);
+    expect(flatBuilding).not.toBeNull();
+    expect(flatBuilding!.coords).toBeInstanceOf(Float64Array);
+    expect(flatBuilding!.ringEnds).toEqual(new Uint32Array([10]));
+    expect(flatBuilding!.polygonEnds).toEqual(new Uint32Array([1]));
+    expect(unpackFlatGeoPolygon(flatBuilding!)).toEqual(buildingFeat.toGeoPolygons(8801, 5371, 14));
+
+    // Polygon with inner hole
+    const pwiTile = new VectorTile(readFixture('polygon-with-inner.pbf'));
+    const pwiFeat = pwiTile.layers.geojson.feature(0);
+    const flatPwi = pwiFeat.toFlatGeoPolygons(0, 0, 0);
+    expect(flatPwi).not.toBeNull();
+    expect(flatPwi!.ringEnds.length).toBe(2);
+    expect(flatPwi!.polygonEnds).toEqual(new Uint32Array([2]));
+    expect(unpackFlatGeoPolygon(flatPwi!)).toEqual(pwiFeat.toGeoPolygons(0, 0, 0));
+
+    // MultiPolygon with stacked exterior rings
+    const smpTile = new VectorTile(readFixture('stacked-multipolygon.pbf'));
+    const smpFeat = smpTile.layers.geojson.feature(0);
+    const flatSmp = smpFeat.toFlatGeoPolygons(0, 0, 0);
+    expect(flatSmp).not.toBeNull();
+    expect(flatSmp!.polygonEnds).toEqual(new Uint32Array([1, 2]));
+    expect(unpackFlatGeoPolygon(flatSmp!)).toEqual(smpFeat.toGeoPolygons(0, 0, 0));
+
+    // Empty polygon
+    const emptyPolyBytes = [...varintField(1, 1), ...varintField(3, FeatureType.POLYGON), ...lenField(4, [])];
+    const emptyPolyTile = new VectorTile(
+      new Uint8Array(lenField(3, [...strField(1, 'layer'), ...lenField(2, emptyPolyBytes)])),
+    );
+    const flatEmpty = emptyPolyTile.layers.layer.feature(0).toFlatGeoPolygons(0, 0, 0);
+    expect(flatEmpty).toEqual({
+      coords: new Float64Array(0),
+      ringEnds: new Uint32Array(0),
+      polygonEnds: new Uint32Array(0),
+    });
+  });
+
   it('supports in-place coordinate transform callbacks', () => {
     const roadFeature = tile.layers.road.feature(656);
     const transformed = roadFeature.loadGeometry((x, y) => [x * 2, y * 2] as Coord2D);
@@ -415,6 +482,30 @@ describe('Feature and FeatureType', () => {
     const polyFlat = pwiTile.layers.geojson.feature(0).loadFlatGeometry();
     expect(polyFlat.ends.length).toBe(2);
     expect(polyFlat.coords.length).toBe(polyFlat.ends[1]);
+  });
+
+  it('provides toFlatGeoGeometry returning projected coordinates in contiguous typed arrays', () => {
+    const roadFeature = tile.layers.road.feature(656);
+    const flatGeo = roadFeature.toFlatGeoGeometry(8801, 5371, 14);
+    expect(flatGeo.coords).toBeInstanceOf(Float64Array);
+    expect(flatGeo.ends).toBeInstanceOf(Uint32Array);
+    expect(flatGeo.ends).toEqual(new Uint32Array([6]));
+    expect(flatGeo.coords.length).toBe(6);
+
+    const geoLines = roadFeature.toGeoLines(8801, 5371, 14)!;
+    expect(flatGeo.coords[0]).toBe(geoLines[0][0][0]);
+    expect(flatGeo.coords[1]).toBe(geoLines[0][0][1]);
+    expect(flatGeo.coords[2]).toBe(geoLines[0][1][0]);
+    expect(flatGeo.coords[3]).toBe(geoLines[0][1][1]);
+    expect(flatGeo.coords[4]).toBe(geoLines[0][2][0]);
+    expect(flatGeo.coords[5]).toBe(geoLines[0][2][1]);
+
+    const poiFeat = tile.layers.poi_label.feature(11);
+    const flatPoi = poiFeat.toFlatGeoGeometry(8801, 5371, 14);
+    const geoPts = poiFeat.toGeoPoints(8801, 5371, 14)!;
+    expect(flatPoi.ends).toEqual(new Uint32Array([2]));
+    expect(flatPoi.coords[0]).toBe(geoPts[0][0]);
+    expect(flatPoi.coords[1]).toBe(geoPts[0][1]);
   });
 
   it('is re-entrant and exception-safe across nested geometry decodes', () => {
@@ -465,6 +556,7 @@ describe('Feature and FeatureType', () => {
     expect(feat.type).toBe(FeatureType.UNKNOWN);
     expect(() => feat.loadGeometry()).toThrow('feature has no geometry');
     expect(() => feat.loadFlatGeometry()).toThrow('feature has no geometry');
+    expect(() => feat.toFlatGeoGeometry(0, 0, 0)).toThrow('feature has no geometry');
     expect(() => feat.bbox()).toThrow('feature has no geometry');
     expect(() => feat.geoBbox(0, 0, 0)).toThrow('feature has no geometry');
     expect(() => feat.toGeoJSON(0, 0, 0)).toThrow('Unknown feature type');
@@ -474,12 +566,14 @@ describe('Feature and FeatureType', () => {
     expect(feat.toGeoPoints(0, 0, 0)).toBeNull();
     expect(feat.toGeoLines(0, 0, 0)).toBeNull();
     expect(feat.toGeoPolygons(0, 0, 0)).toBeNull();
+    expect(feat.toFlatGeoPolygons(0, 0, 0)).toBeNull();
 
     const noGeomBytes = [...varintField(1, 1), ...varintField(3, FeatureType.POINT)];
     const noGeomLayerBytes = [...strField(1, 'layer'), ...lenField(2, noGeomBytes), ...varintField(5, 4096)];
     const noGeomFeat = new VectorTile(new Uint8Array(lenField(3, noGeomLayerBytes))).layers.layer.feature(0);
     expect(() => noGeomFeat.loadGeometry()).toThrow('feature has no geometry');
     expect(() => noGeomFeat.loadFlatGeometry()).toThrow('feature has no geometry');
+    expect(() => noGeomFeat.toFlatGeoGeometry(0, 0, 0)).toThrow('feature has no geometry');
     expect(() => noGeomFeat.bbox()).toThrow('feature has no geometry');
     expect(() => noGeomFeat.geoBbox(0, 0, 0)).toThrow('feature has no geometry');
     expect(() => noGeomFeat.toGeoJSON(0, 0, 0)).toThrow('feature has no geometry');
@@ -489,6 +583,12 @@ describe('Feature and FeatureType', () => {
     expect(noGeomFeat.asPolygons()).toBeNull();
     expect(noGeomFeat.toGeoLines(0, 0, 0)).toBeNull();
     expect(noGeomFeat.toGeoPolygons(0, 0, 0)).toBeNull();
+    expect(noGeomFeat.toFlatGeoPolygons(0, 0, 0)).toBeNull();
+
+    const noGeomPolyBytes = [...varintField(1, 1), ...varintField(3, FeatureType.POLYGON)];
+    const noGeomPolyLayer = [...strField(1, 'layer'), ...lenField(2, noGeomPolyBytes), ...varintField(5, 4096)];
+    const noGeomPolyFeat = new VectorTile(new Uint8Array(lenField(3, noGeomPolyLayer))).layers.layer.feature(0);
+    expect(() => noGeomPolyFeat.toFlatGeoPolygons(0, 0, 0)).toThrow('feature has no geometry');
   });
 
   it('skips zero-count geometry commands and throws on unknown commands', () => {
