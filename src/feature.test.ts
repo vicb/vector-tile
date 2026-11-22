@@ -426,12 +426,12 @@ describe('Feature and FeatureType', () => {
     expect(() => badFeat.loadFlatGeometry()).toThrow('unknown command 3');
     expect(() => badFeat.bbox()).toThrow('unknown command 3');
 
-    // Polygon feature with empty geometry stream returning [[]]
+    // Polygon feature with empty geometry stream returning []
     const emptyPolyBytes = [...varintField(1, 1), ...varintField(3, FeatureType.POLYGON), ...lenField(4, [])];
     const emptyPolyTile = new VectorTile(
       new Uint8Array(lenField(3, [...strField(1, 'layer'), ...lenField(2, emptyPolyBytes)])),
     );
-    expect(emptyPolyTile.layers.layer.feature(0).asPolygons()).toEqual([[]]);
+    expect(emptyPolyTile.layers.layer.feature(0).asPolygons()).toEqual([]);
   });
 
   it('creates distinct Point instance for ClosePath closing vertex', () => {
