@@ -436,6 +436,29 @@ describe('Feature and FeatureType', () => {
     expect(feat.bbox()).toEqual([1506, 306, 1988, 347]);
   });
 
+  it('computes fast geographic bounding box with geoBbox', () => {
+    const poiFeat = tile.layers.poi_label.feature(11);
+    const ptBbox = poiFeat.geoBbox(8801, 5371, 14);
+    expect(ptBbox).toEqual([13.402258157730103, 52.543989253806245, 13.402258157730103, 52.543989253806245]);
+
+    const roadFeat = tile.layers.road.feature(656);
+    const roadBbox = roadFeat.geoBbox(8801, 5371, 14);
+    const lines = roadFeat.toGeoLines(8801, 5371, 14)!;
+    const [minLon, minLat, maxLon, maxLat] = roadBbox;
+
+    expect(minLon).toBeLessThanOrEqual(maxLon);
+    expect(minLat).toBeLessThanOrEqual(maxLat);
+
+    for (const line of lines) {
+      for (const [lon, lat] of line) {
+        expect(lon).toBeGreaterThanOrEqual(minLon);
+        expect(lon).toBeLessThanOrEqual(maxLon);
+        expect(lat).toBeGreaterThanOrEqual(minLat);
+        expect(lat).toBeLessThanOrEqual(maxLat);
+      }
+    }
+  });
+
   it('handles empty and missing geometry error conditions', () => {
     const emptyFeatLayer = new Uint8Array(lenField(3, [...strField(1, 'l'), ...lenField(2, [])]));
     const feat = new VectorTile(emptyFeatLayer).layers.l.feature(0);
@@ -443,10 +466,14 @@ describe('Feature and FeatureType', () => {
     expect(() => feat.loadGeometry()).toThrow('feature has no geometry');
     expect(() => feat.loadFlatGeometry()).toThrow('feature has no geometry');
     expect(() => feat.bbox()).toThrow('feature has no geometry');
+    expect(() => feat.geoBbox(0, 0, 0)).toThrow('feature has no geometry');
     expect(() => feat.toGeoJSON(0, 0, 0)).toThrow('Unknown feature type');
     expect(feat.asPoints()).toBeNull();
     expect(feat.asLines()).toBeNull();
     expect(feat.asPolygons()).toBeNull();
+    expect(feat.toGeoPoints(0, 0, 0)).toBeNull();
+    expect(feat.toGeoLines(0, 0, 0)).toBeNull();
+    expect(feat.toGeoPolygons(0, 0, 0)).toBeNull();
 
     const noGeomBytes = [...varintField(1, 1), ...varintField(3, FeatureType.POINT)];
     const noGeomLayerBytes = [...strField(1, 'layer'), ...lenField(2, noGeomBytes), ...varintField(5, 4096)];
@@ -454,10 +481,14 @@ describe('Feature and FeatureType', () => {
     expect(() => noGeomFeat.loadGeometry()).toThrow('feature has no geometry');
     expect(() => noGeomFeat.loadFlatGeometry()).toThrow('feature has no geometry');
     expect(() => noGeomFeat.bbox()).toThrow('feature has no geometry');
+    expect(() => noGeomFeat.geoBbox(0, 0, 0)).toThrow('feature has no geometry');
     expect(() => noGeomFeat.toGeoJSON(0, 0, 0)).toThrow('feature has no geometry');
     expect(() => noGeomFeat.asPoints()).toThrow('feature has no geometry');
+    expect(() => noGeomFeat.toGeoPoints(0, 0, 0)).toThrow('feature has no geometry');
     expect(noGeomFeat.asLines()).toBeNull();
     expect(noGeomFeat.asPolygons()).toBeNull();
+    expect(noGeomFeat.toGeoLines(0, 0, 0)).toBeNull();
+    expect(noGeomFeat.toGeoPolygons(0, 0, 0)).toBeNull();
   });
 
   it('skips zero-count geometry commands and throws on unknown commands', () => {
